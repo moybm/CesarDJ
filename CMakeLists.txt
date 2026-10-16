@@ -5,6 +5,9 @@ project(MiDJ VERSION 0.5.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Runtime de Visual C++ dentro del .exe: MiDJ.exe funciona en otro PC sin instalar nada
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # Las dependencias se descargan automáticamente la primera vez que se configura el proyecto
 include(FetchContent)
 
