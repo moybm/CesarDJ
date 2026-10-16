@@ -1,5 +1,18 @@
 #include "DeckFx.h"
 
+juce::String DeckFx::typeName (int type)
+{
+    switch (type)
+    {
+        case flanger:    return "FLANGER";
+        case cut:        return "CORTAR";
+        case echo:       return "ECO";
+        case reverb:     return "REVERB";
+        case bitcrusher: return "BITCRUSH";
+        default:         return {};
+    }
+}
+
 void DeckFx::prepare (double newSampleRate, int maxBlockSize)
 {
     sampleRate = newSampleRate;
@@ -14,6 +27,15 @@ void DeckFx::prepare (double newSampleRate, int maxBlockSize)
 
     filterAmount.reset (sampleRate, 0.03);
     flangerAmount.reset (sampleRate, 0.03);
+    echoAmount.reset (sampleRate, 0.03);
+    echoDelay.reset (sampleRate, 0.25);     // cambios de tempo suaves, sin saltos en el eco
+    reverbAmount.reset (sampleRate, 0.05);
+
+    const auto echoSize = (size_t) (sampleRate * 4.0);
+    echoL.assign (echoSize, 0.0f);
+    echoR.assign (echoSize, 0.0f);
+
+    reverbFx.setSampleRate (sampleRate);
     reset();
 }
 
@@ -25,17 +47,39 @@ void DeckFx::reset()
         ch.fill (0.0f);
     flangerWrite = 0;
     cutGain = 1.0f;
+    std::fill (echoL.begin(), echoL.end(), 0.0f);
+    std::fill (echoR.begin(), echoR.end(), 0.0f);
+    echoWrite = 0;
+    reverbFx.reset();
+    reverbTail = 0;
+    crushCounter = 0;
 }
 
 void DeckFx::process (float* left, float* right, int numSamples,
-                      float filter, float flanger, float cut,
+                      float filter, int type2, float amount2, int type3, float amount3,
                       double beatPhase, double beatIncrement)
 {
     processFilter (left, right, numSamples, filter);
-    processFlanger (left, right, numSamples, flanger);
-    processCut (left, right, numSamples, cut, beatPhase, beatIncrement);
+    processSlot (type2, left, right, numSamples, amount2, beatPhase, beatIncrement);
+    if (type3 != type2)
+        processSlot (type3, left, right, numSamples, amount3, beatPhase, beatIncrement);
 }
 
+void DeckFx::processSlot (int type, float* left, float* right, int numSamples, float amount,
+                          double beatPhase, double beatIncrement)
+{
+    switch (type)
+    {
+        case flanger:    processFlanger (left, right, numSamples, amount); break;
+        case cut:        processCut (left, right, numSamples, amount, beatPhase, beatIncrement); break;
+        case echo:       processEcho (left, right, numSamples, amount, beatIncrement); break;
+        case reverb:     processReverb (left, right, numSamples, amount); break;
+        case bitcrusher: processBitcrusher (left, right, numSamples, amount); break;
+        default: break;
+    }
+}
+
+//==============================================================================
 void DeckFx::processFilter (float* left, float* right, int numSamples, float amount)
 {
     filterAmount.setTargetValue (amount);
@@ -43,7 +87,7 @@ void DeckFx::processFilter (float* left, float* right, int numSamples, float amo
     if (! filterAmount.isSmoothing() && std::abs (amount) < 0.02f)
     {
         filterAmount.setCurrentAndTargetValue (amount);
-        return;     // sin efecto: no gastar CPU (los filtros conservan su estado)
+        return;     // sin efecto: no gastar CPU
     }
 
     constexpr int subBlock = 32;
@@ -132,5 +176,94 @@ void DeckFx::processCut (float* left, float* right, int numSamples, float amount
         cutGain += (target - cutGain) * smoothing;
         left[i] *= cutGain;
         right[i] *= cutGain;
+    }
+}
+
+// Eco de 3/4 de beat (o 375 ms sin beatgrid). El mando sube a la vez la mezcla y la realimentación.
+void DeckFx::processEcho (float* left, float* right, int numSamples, float amount, double beatIncrement)
+{
+    echoAmount.setTargetValue (amount);
+    if (! echoAmount.isSmoothing() && amount < 0.01f)
+    {
+        // Las repeticiones se apagan solas aunque el mando esté a 0
+        bool silent = true;
+        for (size_t i = 0; i < echoL.size() && silent; i += 997)
+            silent = std::abs (echoL[i]) < 1.0e-4f;
+        if (silent)
+            return;
+    }
+
+    const double delaySeconds = beatIncrement > 0.0 ? 0.75 / (beatIncrement * sampleRate) : 0.375;
+    echoDelay.setTargetValue ((float) juce::jlimit (0.01, 3.9, delaySeconds) * (float) sampleRate);
+
+    const int size = (int) echoL.size();
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float a = echoAmount.getNextValue();
+        const float delay = echoDelay.getNextValue();
+        const float feedback = 0.25f + 0.45f * a;
+
+        float readPos = (float) echoWrite - delay;
+        if (readPos < 0.0f)
+            readPos += (float) size;
+        const int i0 = (int) readPos;
+        const int i1 = (i0 + 1) % size;
+        const float frac = readPos - (float) i0;
+
+        const float dl = echoL[(size_t) i0] + frac * (echoL[(size_t) i1] - echoL[(size_t) i0]);
+        const float dr = echoR[(size_t) i0] + frac * (echoR[(size_t) i1] - echoR[(size_t) i0]);
+
+        // Ping-pong: cada repetición cambia de lado
+        echoL[(size_t) echoWrite] = left[i] * a + dr * feedback;
+        echoR[(size_t) echoWrite] = right[i] * a + dl * feedback;
+        left[i] += dl * 0.8f;
+        right[i] += dr * 0.8f;
+
+        echoWrite = (echoWrite + 1) % size;
+    }
+}
+
+void DeckFx::processReverb (float* left, float* right, int numSamples, float amount)
+{
+    reverbAmount.setTargetValue (amount);
+
+    if (amount >= 0.01f)
+        reverbTail = (int) (sampleRate * 4.0);
+    else if (reverbTail <= 0 && ! reverbAmount.isSmoothing())
+        return;
+
+    reverbTail -= numSamples;
+
+    const float a = reverbAmount.skip (numSamples);
+    juce::Reverb::Parameters p;
+    p.roomSize = 0.55f + 0.4f * a;
+    p.damping = 0.45f;
+    p.wetLevel = 0.45f * a;
+    p.dryLevel = 1.0f - 0.25f * a;
+    p.width = 1.0f;
+    reverbFx.setParameters (p);
+    reverbFx.processStereo (left, right, numSamples);
+}
+
+// Reduce bits (16 -> 4) y frecuencia de muestreo (hasta 1/12) a la vez
+void DeckFx::processBitcrusher (float* left, float* right, int numSamples, float amount)
+{
+    if (amount < 0.02f)
+        return;
+
+    const float bits = 16.0f - 12.0f * amount;
+    const float levels = std::pow (2.0f, bits) * 0.5f;
+    const int hold = 1 + (int) (amount * 11.0f);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        if (crushCounter++ % hold == 0)
+        {
+            crushHoldL = std::round (left[i] * levels) / levels;
+            crushHoldR = std::round (right[i] * levels) / levels;
+        }
+
+        left[i]  = left[i]  + (crushHoldL - left[i])  * amount;
+        right[i] = right[i] + (crushHoldR - right[i]) * amount;
     }
 }

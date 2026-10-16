@@ -5,7 +5,6 @@ using namespace DJColours;
 
 namespace
 {
-    const char* const fxNames[] = { "FILTRO", "FLANGER", "CORTAR" };
     const double rollBeats[] = { 0.125, 0.25, 0.5, 1.0 };
     const double jumpBeats[] = { -4.0, -1.0, 1.0, 4.0 };
 
@@ -71,6 +70,16 @@ void PerformancePad::mouseDown (const juce::MouseEvent& e)
         onPress (true, e.mods);
 }
 
+void PerformancePad::externalPress (bool isDown)
+{
+    if (! enabled || isDown == pressed)
+        return;
+    pressed = isDown;
+    repaint();
+    if (onPress != nullptr)
+        onPress (isDown, {});
+}
+
 void PerformancePad::mouseUp (const juce::MouseEvent& e)
 {
     if (! pressed)
@@ -82,9 +91,9 @@ void PerformancePad::mouseUp (const juce::MouseEvent& e)
 }
 
 //==============================================================================
-DeckComponent::DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& otherDeck)
+DeckComponent::DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& otherDeck, SamplerEngine& samplerEngine)
     : index (deckIndex), mirrored (deckIndex == 1), colour (forDeck (deckIndex)),
-      deck (engine), other (otherDeck), overview (engine), jog (engine, forDeck (deckIndex))
+      deck (engine), other (otherDeck), sampler (samplerEngine), overview (engine), jog (engine, forDeck (deckIndex))
 {
     addAndMakeVisible (overview);
     addAndMakeVisible (jog);
@@ -106,8 +115,8 @@ DeckComponent::DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& oth
     modeButtons[0].setTooltip ("Hot cues: clic = fijar / saltar, clic derecho = borrar");
     modeButtons[1].setTooltip (juce::String::fromUTF8 ("Loop roll mientras mantienes pulsado; al soltar la canción sigue donde estaría"));
     modeButtons[2].setTooltip (juce::String::fromUTF8 ("Saltar beats hacia atrás o adelante"));
-    modeButtons[3].setTooltip (juce::String::fromUTF8 ("Sampler: llegará en la Fase 5"));
-    modeButtons[3].setEnabled (false);
+    modeButtons[3].setTooltip (juce::String::fromUTF8 ("Sampler: clic = sonar, clic derecho = cargar sonido / modo bucle. "
+                                                       "También puedes soltar un archivo de audio sobre un pad."));
 
     // ---- FX
     for (int i = 0; i < 3; ++i)
@@ -124,11 +133,12 @@ DeckComponent::DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& oth
         addAndMakeVisible (k);
     }
     fxKnobs[0].setTooltip ("Izquierda: paso bajo | Derecha: paso alto | Doble clic: centro");
-    fxKnobs[1].setTooltip ("Cantidad de flanger");
-    fxKnobs[2].setTooltip (juce::String::fromUTF8 ("Corta el audio al ritmo: 1/2, 1/4 o 1/8 de beat según la posición"));
+    for (int i = 1; i < 3; ++i)
+        fxKnobs[(size_t) i].setTooltip (juce::String::fromUTF8 ("Cantidad del efecto. Haz clic en su nombre para elegir otro efecto "
+                                                                "(Flanger, Cortar, Eco, Reverb, Bitcrush)"));
     fxKnobs[0].onValueChange = [this] { deck.fxFilter  = (float) fxKnobs[0].getValue(); };
-    fxKnobs[1].onValueChange = [this] { deck.fxFlanger = (float) fxKnobs[1].getValue(); };
-    fxKnobs[2].onValueChange = [this] { deck.fxCut     = (float) fxKnobs[2].getValue(); };
+    fxKnobs[1].onValueChange = [this] { deck.fxAmount2 = (float) fxKnobs[1].getValue(); };
+    fxKnobs[2].onValueChange = [this] { deck.fxAmount3 = (float) fxKnobs[2].getValue(); };
 
     // ---- Loop
     loopHalve.onClick  = [this] { deck.setLoopBeats (deck.getLoopBeats() * 0.5); };
@@ -186,6 +196,27 @@ DeckComponent::DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& oth
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "No se pudo abrir",
                                                 juce::String::fromUTF8 ("Formato no soportado o archivo dañado:\n") + f.getFileName());
     };
+
+    // Identificadores estables: los usa el MIDI learn para guardar las asignaciones
+    const juce::String id = index == 0 ? "A." : "B.";
+    playButton.setComponentID (id + "play");
+    cueButton.setComponentID (id + "cue");
+    syncButton.setComponentID (id + "sync");
+    matchButton.setComponentID (id + "match");
+    keyButton.setComponentID (id + "keylock");
+    rangeButton.setComponentID (id + "pitchRange");
+    pitchSlider.setComponentID (id + "pitch");
+    loopSize.setComponentID (id + "loop");
+    loopHalve.setComponentID (id + "loopHalf");
+    loopDouble.setComponentID (id + "loopDouble");
+    jog.setComponentID (id + "jog");
+    for (int i = 0; i < 4; ++i)
+    {
+        pads[(size_t) i].setComponentID (id + "pad" + juce::String (i + 1));
+        modeButtons[(size_t) i].setComponentID (id + "padMode" + juce::String (i + 1));
+    }
+    for (int i = 0; i < 3; ++i)
+        fxKnobs[(size_t) i].setComponentID (id + "fx" + juce::String (i + 1));
 
     setPadMode (PadMode::hotCue);
     startTimerHz (30);
@@ -279,6 +310,13 @@ void DeckComponent::padPressed (int pad, bool isDown, const juce::ModifierKeys& 
             break;
 
         case PadMode::sampler:
+            if (isDown)
+            {
+                if (mods.isPopupMenu())
+                    showSampleMenu (pad);
+                else
+                    sampler.trigger (samplerSlot (pad));
+            }
             break;
     }
 
@@ -309,8 +347,14 @@ void DeckComponent::updatePads()
                 p.setTooltip ({});
                 break;
             case PadMode::sampler:
-                p.setLook ("-", panelLight, false, false);
+            {
+                const int slot = samplerSlot (i);
+                const auto& info = sampler.getInfo (slot);
+                p.setLook (info.name + (info.loop ? juce::String::fromUTF8 (" \xe2\x86\xbb") : juce::String()),
+                           juce::Colour (0xffe0912a), sampler.isPlaying (slot), true);
+                p.setTooltip ("Clic: sonar | Clic derecho: cargar sonido, modo bucle...");
                 break;
+            }
         }
     }
 }
@@ -334,7 +378,7 @@ void DeckComponent::timerCallback()
                         && std::abs (deck.getEffectiveBpm() - other.getEffectiveBpm()) < 0.01;
     syncButton.setToggleState (synced, juce::dontSendNotification);
 
-    if (padMode == PadMode::hotCue)
+    if (padMode == PadMode::hotCue || padMode == PadMode::sampler)
         updatePads();
 
     repaint (headerArea);
@@ -439,7 +483,12 @@ void DeckComponent::paint (juce::Graphics& g)
     g.setColour (textDim);
     g.setFont (juce::FontOptions (10.5f));
     for (int i = 0; i < 3; ++i)
-        g.drawText (fxNames[i], fxLabels[(size_t) i], juce::Justification::centred);
+    {
+        const int type = i == 1 ? deck.fxType2.load() : deck.fxType3.load();
+        g.setColour (i == 0 ? textDim : DJColours::text.withAlpha (0.75f));
+        g.drawText (i == 0 ? juce::String ("FILTRO") : DeckFx::typeName (type) + juce::String::fromUTF8 (" \xe2\x96\xbe"),
+                    fxLabels[(size_t) i], juce::Justification::centred);
+    }
 
     const double pitch = deck.getPitch();
     g.setColour (std::abs (pitch) < 0.005 ? textDim : DJColours::text);
@@ -542,9 +591,78 @@ bool DeckComponent::isInterestedInFileDrag (const juce::StringArray& files)
     return ! files.isEmpty();
 }
 
-void DeckComponent::filesDropped (const juce::StringArray& files, int, int)
+void DeckComponent::mouseDown (const juce::MouseEvent& e)
+{
+    for (int slot = 1; slot < 3; ++slot)
+        if (fxLabels[(size_t) slot].contains (e.getPosition()))
+            showFxMenu (slot);
+}
+
+void DeckComponent::showFxMenu (int slot)
+{
+    auto& type = slot == 1 ? deck.fxType2 : deck.fxType3;
+    const int otherType = slot == 1 ? deck.fxType3.load() : deck.fxType2.load();
+
+    juce::PopupMenu m;
+    for (int t = 0; t < DeckFx::numTypes; ++t)
+        m.addItem (DeckFx::typeName (t), t != otherType, t == type.load(), [this, &type, t]
+        {
+            type = t;
+            repaint();
+        });
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (fxLabels[(size_t) slot])));
+}
+
+void DeckComponent::showSampleMenu (int pad)
+{
+    const int slot = samplerSlot (pad);
+    const auto& info = sampler.getInfo (slot);
+
+    juce::PopupMenu m;
+    m.addSectionHeader (info.name);
+    m.addItem (juce::String::fromUTF8 ("Cargar sonido..."), [this, slot]
+    {
+        sampleChooser = std::make_unique<juce::FileChooser> ("Elige un sonido para el sampler",
+                                                             juce::File::getSpecialLocation (juce::File::userMusicDirectory),
+                                                             "*.wav;*.mp3;*.aif;*.aiff;*.flac;*.ogg");
+        sampleChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                    [this, slot] (const juce::FileChooser& fc)
+                                    {
+                                        if (fc.getResult().existsAsFile() && onLoadSample != nullptr)
+                                            onLoadSample (slot, fc.getResult());
+                                    });
+    });
+    m.addItem ("Modo bucle", true, info.loop, [this, slot]
+    {
+        sampler.setLoop (slot, ! sampler.getInfo (slot).loop);
+        if (onSamplerChanged != nullptr) onSamplerChanged();
+    });
+    m.addItem ("Detener", sampler.isPlaying (slot), false, [this, slot] { sampler.stop (slot); });
+    m.addSeparator();
+    m.addItem ("Restaurar sonido de serie", info.file != juce::File(), false, [this, slot]
+    {
+        sampler.restoreDefault (slot);
+        if (onSamplerChanged != nullptr) onSamplerChanged();
+    });
+
+    m.showMenuAsync (juce::PopupMenu::Options());
+}
+
+void DeckComponent::filesDropped (const juce::StringArray& files, int x, int y)
 {
     setDragHighlight (false);
+
+    // En modo sampler, soltar un archivo sobre un pad lo carga en ese pad
+    if (padMode == PadMode::sampler && ! files.isEmpty())
+        for (int i = 0; i < 4; ++i)
+            if (pads[(size_t) i].getBounds().contains (x, y))
+            {
+                if (onLoadSample != nullptr)
+                    onLoadSample (samplerSlot (i), juce::File (files[0]));
+                return;
+            }
+
     if (! files.isEmpty())
         loadFile (juce::File (files[0]));
 }

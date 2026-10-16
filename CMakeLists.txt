@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MiDJ VERSION 0.4.0)
+project(MiDJ VERSION 0.5.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,7 +71,10 @@ target_sources(MiDJ PRIVATE
     Source/BrowserComponent.cpp
     Source/LibraryTree.cpp
     Source/TagReader.cpp
-    Source/Library.cpp)
+    Source/Library.cpp
+    Source/SamplerEngine.cpp
+    Source/Recorder.cpp
+    Source/MidiController.cpp)
 
 target_compile_definitions(MiDJ PRIVATE
     JUCE_WEB_BROWSER=0

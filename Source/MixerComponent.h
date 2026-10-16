@@ -31,7 +31,7 @@ class MixerComponent : public juce::Component,
                        private juce::Timer
 {
 public:
-    explicit MixerComponent (MixerEngine& engine);
+    MixerComponent (MixerEngine& engine, SamplerEngine& sampler);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -51,6 +51,8 @@ private:
     MixerEngine& mixer;
     std::array<Strip, MixerEngine::numChannels> strips;
     juce::Slider crossfader { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
+    juce::Slider samplerVolume;
+    juce::Rectangle<int> samplerLabel;
     std::unique_ptr<VuMeter> masterMeter;
     juce::Rectangle<int> titleArea, masterLabel, xfLabelA, xfLabelB;
 

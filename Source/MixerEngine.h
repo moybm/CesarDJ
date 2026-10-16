@@ -3,6 +3,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_dsp/juce_dsp.h>
 #include "DeckEngine.h"
+#include "SamplerEngine.h"
+#include "Recorder.h"
 
 // EQ de 3 bandas tipo "isolator" (como en los mixers DJ): con el mando al mínimo la banda se elimina del todo.
 // Divide la señal en graves / medios / agudos con filtros Linkwitz-Riley y vuelve a sumarlas con su ganancia.
@@ -33,7 +35,7 @@ struct ChannelParams
 class MixerEngine : public juce::AudioSource
 {
 public:
-    MixerEngine (DeckEngine& deckA, DeckEngine& deckB);
+    MixerEngine (DeckEngine& deckA, DeckEngine& deckB, SamplerEngine& sampler, Recorder& recorder);
 
     static constexpr int numChannels = 2;
     ChannelParams& getChannel (int index)   { return channels[(size_t) index].params; }
@@ -58,6 +60,8 @@ private:
     };
 
     std::array<Channel, numChannels> channels;
+    SamplerEngine& sampler;
+    Recorder& recorder;
     juce::SmoothedValue<float> masterGain { 1.0f };
     juce::AudioBuffer<float> cueBuffer;
     juce::dsp::Limiter<float> limiter;

@@ -3,6 +3,7 @@
 #include "DeckEngine.h"
 #include "JogWheel.h"
 #include "OverviewWaveform.h"
+#include "SamplerEngine.h"
 
 // Pad de interpretación: avisa al pulsar y al soltar (necesario para los rolls)
 class PerformancePad : public juce::Component,
@@ -12,6 +13,7 @@ public:
     std::function<void (bool isDown, const juce::ModifierKeys&)> onPress;
 
     void setLook (const juce::String& newText, juce::Colour newColour, bool isLit, bool isEnabled);
+    void externalPress (bool isDown);           // pad de una controladora MIDI
 
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& e) override;
@@ -30,17 +32,22 @@ class DeckComponent : public juce::Component,
                       private juce::Timer
 {
 public:
-    DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& otherDeck);
+    DeckComponent (int deckIndex, DeckEngine& engine, DeckEngine& otherDeck, SamplerEngine& sampler);
     ~DeckComponent() override;
 
     void loadFile (const juce::File& file);
 
     // La ventana principal lo conecta con la biblioteca para recuperar BPM y cues ya guardados
     std::function<DeckEngine::TrackInfo (const juce::File&)> infoForFile;
+
+    // Sampler: la ventana principal carga el archivo y guarda la configuración
+    std::function<void (int slot, const juce::File&)> onLoadSample;
+    std::function<void()> onSamplerChanged;
     void sync (bool alignPhase);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent& e) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void fileDragEnter (const juce::StringArray&, int, int) override             { setDragHighlight (true); }
@@ -59,6 +66,9 @@ private:
     void setPadMode (PadMode mode);
     void padPressed (int pad, bool isDown, const juce::ModifierKeys& mods);
     void updatePads();
+    void showSampleMenu (int pad);
+    void showFxMenu (int slot);
+    int samplerSlot (int pad) const             { return index * 4 + pad; }
     void setPitchValue (double percent);
     void cyclePitchRange();
     void setDragHighlight (bool on)                                               { dragHighlight = on; repaint(); }
@@ -70,6 +80,8 @@ private:
     const juce::Colour colour;
     DeckEngine& deck;
     DeckEngine& other;
+    SamplerEngine& sampler;
+    std::unique_ptr<juce::FileChooser> sampleChooser;
 
     OverviewWaveform overview;
     JogWheel jog;

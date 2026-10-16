@@ -22,6 +22,9 @@ public:
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
+    // Plato de una controladora MIDI (encoder relativo): sonando empuja/frena, en pausa recorre la canción
+    void midiTurn (int delta);
+
 private:
     void timerCallback() override;
     float angleAt (juce::Point<float> p) const;

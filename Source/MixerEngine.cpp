@@ -72,7 +72,8 @@ void IsolatorEQ::process (juce::AudioBuffer<float>& buffer, int numSamples)
 }
 
 //==============================================================================
-MixerEngine::MixerEngine (DeckEngine& deckA, DeckEngine& deckB)
+MixerEngine::MixerEngine (DeckEngine& deckA, DeckEngine& deckB, SamplerEngine& s, Recorder& r)
+    : sampler (s), recorder (r)
 {
     channels[0].deck = &deckA;
     channels[1].deck = &deckB;
@@ -92,6 +93,7 @@ void MixerEngine::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
     }
 
     masterGain.reset (sampleRate, smoothingSeconds);
+    sampler.prepare (sampleRate);
     cueBuffer.setSize (2, maxBlock);
 
     limiter.prepare ({ sampleRate, (juce::uint32) maxBlock, 2 });
@@ -158,6 +160,9 @@ void MixerEngine::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferT
             out.addFrom (ch, start, c.buffer, ch, 0, n);
     }
 
+    // El sampler va directo al master (después del crossfader)
+    sampler.addTo (out, start, n);
+
     const float mv = masterVolume.load();
     masterGain.setTargetValue (mv * mv);
     for (int i = 0; i < n; ++i)
@@ -172,6 +177,13 @@ void MixerEngine::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferT
     {
         juce::dsp::AudioBlock<float> block (out.getArrayOfWritePointers(), 2, (size_t) start, (size_t) n);
         limiter.process (juce::dsp::ProcessContextReplacing<float> (block));
+    }
+
+    // Grabación del master (después del limitador: exactamente lo que suena)
+    if (outChannels == 2)
+    {
+        const float* rec[] = { out.getReadPointer (0, start), out.getReadPointer (1, start) };
+        recorder.write (rec, n);
     }
 
     // Auriculares: los canales en PFL, o el master si no hay ninguno

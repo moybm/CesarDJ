@@ -197,6 +197,19 @@ void JogWheel::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDe
     wheelBendUntil = juce::Time::getMillisecondCounterHiRes() + 120.0;
 }
 
+void JogWheel::midiTurn (int delta)
+{
+    if (deck.isPlaying())
+    {
+        deck.setBend (1.0 + juce::jlimit (-0.3, 0.3, delta * 0.02));
+        wheelBendUntil = juce::Time::getMillisecondCounterHiRes() + 80.0;
+    }
+    else
+    {
+        deck.seek (deck.getPosition() + delta * 0.012);
+    }
+}
+
 void JogWheel::timerCallback()
 {
     const double now = juce::Time::getMillisecondCounterHiRes();

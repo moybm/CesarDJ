@@ -49,6 +49,18 @@ private:
             getContentComponent()->grabKeyboardFocus();
         }
 
+        // Al activar la ventana (arranque, volver desde otra app) el teclado vuelve a MiDJ,
+        // salvo que ya lo tenga un control (p. ej. el buscador)
+        void activeWindowStatusChanged() override
+        {
+            DocumentWindow::activeWindowStatusChanged();
+
+            if (isActiveWindow())
+                if (auto* content = getContentComponent())
+                    if (! content->hasKeyboardFocus (true))
+                        content->grabKeyboardFocus();
+        }
+
         void loadFiles (const juce::String& commandLine)
         {
             if (auto* main = dynamic_cast<MainComponent*> (getContentComponent()))

@@ -549,7 +549,8 @@ void DeckEngine::renderChunk (float* L, float* R, int n)
         beatIncrement = (aScratch ? 0.0 : speed / deviceRate) / audioTrack->beatLength();
     }
 
-    fx.process (L, R, n, fxFilter.load(), fxFlanger.load(), fxCut.load(), beatPhase, beatIncrement);
+    fx.process (L, R, n, fxFilter.load(), fxType2.load(), fxAmount2.load(), fxType3.load(), fxAmount3.load(),
+                beatPhase, beatIncrement);
 }
 
 void DeckEngine::renderScratch (float* L, float* R, int n, double srRatio)

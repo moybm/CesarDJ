@@ -89,7 +89,9 @@ public:
     bool isScratching() const                       { return scratching; }
 
     //== Efectos (valores leídos por el hilo de audio) ===============================
-    std::atomic<float> fxFilter { 0.0f }, fxFlanger { 0.0f }, fxCut { 0.0f };
+    // Filtro fijo + dos huecos con el efecto elegido (ver DeckFx::Type)
+    std::atomic<float> fxFilter { 0.0f }, fxAmount2 { 0.0f }, fxAmount3 { 0.0f };
+    std::atomic<int> fxType2 { DeckFx::flanger }, fxType3 { DeckFx::cut };
 
     //== AudioSource ================================================================
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;

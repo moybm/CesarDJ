@@ -45,6 +45,7 @@ MainComponent::MainComponent()
     masterVolume.setColour (juce::Slider::thumbColourId, juce::Colours::white);
     masterVolume.onValueChange = [this] { mixer.masterVolume = (float) masterVolume.getValue(); };
     masterVolume.setTooltip ("Volumen master");
+    masterVolume.setComponentID ("master");
     masterVolume.setWantsKeyboardFocus (false);
     addAndMakeVisible (masterVolume);
 
@@ -52,6 +53,24 @@ MainComponent::MainComponent()
     audioButton.onClick = [this] { showAudioSettings(); };
     audioButton.setTooltip ("Tarjeta de sonido, latencia y salidas (3-4 = auriculares)");
     addAndMakeVisible (audioButton);
+
+    midiButton.setWantsKeyboardFocus (false);
+    midiButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffb05cf0).darker (0.3f));
+    midiButton.onClick = [this] { showMidiMenu(); };
+    midiButton.setTooltip ("Controladoras MIDI y modo aprendizaje (MIDI learn)");
+    addAndMakeVisible (midiButton);
+
+    recButton.setWantsKeyboardFocus (false);
+    recButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffc62828));
+    recButton.onClick = [this] { toggleRecording(); };
+    recButton.setTooltip (juce::String::fromUTF8 ("Graba la sesión (salida master) en WAV de 24 bits, en Música\\MiDJ Grabaciones"));
+    addAndMakeVisible (recButton);
+
+    deckViewA.onLoadSample = deckViewB.onLoadSample = [this] (int slot, const juce::File& f) { loadSample (slot, f); };
+    deckViewA.onSamplerChanged = deckViewB.onSamplerChanged = [this] { saveSamplerSettings(); };
+    restoreSamplerSettings();
+
+    learnListener.onDown = [this] (const juce::MouseEvent& e) { learnClick (e); };
 
     setWantsKeyboardFocus (true);
 
@@ -63,11 +82,22 @@ MainComponent::MainComponent()
     auto savedAudio = settings.getXmlValue ("audioDevice");
     setAudioChannels (0, 4, savedAudio.get());
 
-    startTimerHz (2);
+    midi = std::make_unique<MidiController> (deviceManager, settings, *this);
+    midi->onLearned = [this] (const juce::String& id, const juce::String& desc)
+    {
+        showStatus (juce::String::fromUTF8 ("Asignado: ") + id + "  <-  " + desc);
+        repaint();
+    };
+
+    startTimerHz (10);
 }
 
 MainComponent::~MainComponent()
 {
+    setLearning (false);
+    midi = nullptr;
+    recorder.stop();
+
     if (auto state = deviceManager.createStateXml())
         settings.setValue ("audioDevice", state.get());
     settings.setValue ("masterVolume", masterVolume.getValue());
@@ -168,10 +198,34 @@ void MainComponent::loadFiles (const juce::String& commandLine)
     }
 }
 
-// Atajos:  A -> Q cue, W play, 1-4 hot cues      B -> O cue, P play, 7-0 hot cues      Ctrl+F buscar
+// Atajos:  A -> Q cue, W play, 1-4 hot cues      B -> O cue, P play, 7-0 hot cues
+//          Ctrl+F buscar      Ctrl+M MIDI learn      Esc salir del MIDI learn
+namespace
+{
+    // Ctrl + letra (con Ctrl pulsado Windows no envía el carácter normal, así que se mira el código de tecla)
+    bool ctrlKey (const juce::KeyPress& key, char letter)
+    {
+        const int code = key.getKeyCode();
+        return key.getModifiers().isCtrlDown() && ! key.getModifiers().isAltDown()
+               && (code == letter || code == letter + 32 || code == letter - 'A' + 1);
+    }
+}
+
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
-    if (key == juce::KeyPress ('f', juce::ModifierKeys::ctrlModifier, 0))
+    if (key == juce::KeyPress::escapeKey && midi != nullptr && midi->isLearning())
+    {
+        setLearning (false);
+        return true;
+    }
+
+    if (ctrlKey (key, 'M') && midi != nullptr)
+    {
+        setLearning (! midi->isLearning());
+        return true;
+    }
+
+    if (ctrlKey (key, 'F'))
     {
         browser.focusSearch();
         return true;
@@ -194,6 +248,217 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         default:
             return false;
     }
+}
+
+//==============================================================================
+void MainComponent::timerCallback()
+{
+    // Botón REC con el tiempo de grabación
+    const bool recording = recorder.isRecording();
+    recButton.setToggleState (recording, juce::dontSendNotification);
+    if (recording)
+    {
+        const int s = (int) recorder.getSeconds();
+        recButton.setButtonText (juce::String::fromUTF8 ("\xe2\x97\x8f ") + juce::String (s / 60).paddedLeft ('0', 2)
+                                 + ":" + juce::String (s % 60).paddedLeft ('0', 2));
+    }
+    else
+    {
+        recButton.setButtonText ("REC");
+    }
+
+    midiButton.setToggleState (midi != nullptr && midi->isLearning(), juce::dontSendNotification);
+
+    if (midi != nullptr && midi->isLearning())
+        repaint();                       // resalte del control elegido
+    else
+        repaint (getLocalBounds().removeFromTop (40));
+}
+
+void MainComponent::showStatus (const juce::String& message)
+{
+    statusMessage = message;
+    statusMessageUntil = juce::Time::getMillisecondCounter() + 3500;
+}
+
+void MainComponent::toggleRecording()
+{
+    if (recorder.isRecording())
+    {
+        const auto file = recorder.getFile();
+        const double seconds = recorder.getSeconds();
+        recorder.stop();
+
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::InfoIcon, juce::String::fromUTF8 ("Grabación guardada"),
+            file.getFileName() + "\n" + juce::String (seconds / 60.0, 1) + " min  -  " + juce::File::descriptionOfSizeInBytes (file.getSize()),
+            "Abrir carpeta", "Cerrar", nullptr,
+            juce::ModalCallbackFunction::create ([file] (int r) { if (r == 1) file.revealToUser(); }));
+        return;
+    }
+
+    auto* device = deviceManager.getCurrentAudioDevice();
+    const auto name = "MiDJ " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S") + ".wav";
+    const auto file = Recorder::defaultFolder().getChildFile (name);
+
+    if (device == nullptr || ! recorder.start (file, device->getCurrentSampleRate()))
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "No se pudo grabar",
+                                                "No se pudo crear el archivo:\n" + file.getFullPathName());
+    else
+        showStatus (juce::String::fromUTF8 ("Grabando en ") + file.getFullPathName());
+}
+
+//==============================================================================
+void MainComponent::showMidiMenu()
+{
+    juce::PopupMenu m;
+    const bool learning = midi->isLearning();
+    m.addItem ("Modo aprendizaje (MIDI learn)", true, learning, [this, learning] { setLearning (! learning); });
+    m.addSeparator();
+
+    m.addSectionHeader ("Controladoras conectadas");
+    const auto names = midi->getDeviceNames();
+    if (names.isEmpty())
+        m.addItem ("(ninguna)", false, false, nullptr);
+    for (auto& n : names)
+        m.addItem (n, false, false, nullptr);
+
+    m.addSeparator();
+    if (auto* target = midi->getLearnTarget())
+    {
+        const auto id = target->getComponentID();
+        m.addItem (juce::String::fromUTF8 ("Borrar la asignación de ") + id, midi->isMapped (id), false,
+                   [this, id] { midi->clearMappingsFor (id); repaint(); });
+    }
+    m.addItem ("Borrar todas las asignaciones (" + juce::String (midi->getNumMappings()) + ")", midi->getNumMappings() > 0, false, [this]
+    {
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Borrar asignaciones MIDI",
+            juce::String::fromUTF8 ("Se borrarán todas las asignaciones de la controladora."), "Borrar", "Cancelar", nullptr,
+            juce::ModalCallbackFunction::create ([this] (int r) { if (r == 1) { midi->clearMappings(); repaint(); } }));
+    });
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (midiButton));
+}
+
+void MainComponent::setLearning (bool shouldLearn)
+{
+    if (midi == nullptr || midi->isLearning() == shouldLearn)
+        return;
+
+    midi->setLearning (shouldLearn);
+
+    if (shouldLearn)
+    {
+        juce::Desktop::getInstance().addGlobalMouseListener (&learnListener);
+        showStatus (juce::String::fromUTF8 ("MIDI LEARN: haz clic en un control y después muévelo o púlsalo en tu controladora.  Esc para salir"));
+        statusMessageUntil = 0xffffffff;
+    }
+    else
+    {
+        juce::Desktop::getInstance().removeGlobalMouseListener (&learnListener);
+        statusMessage.clear();
+    }
+
+    repaint();
+}
+
+// En modo aprendizaje, el control que se pulsa pasa a ser el destino de la asignación
+void MainComponent::learnClick (const juce::MouseEvent& e)
+{
+    auto* c = e.originalComponent;
+    if (c == nullptr || (c != this && ! isParentOf (c)))
+        return;
+
+    while (c != nullptr && c != this && c->getComponentID().isEmpty())
+        c = c->getParentComponent();
+
+    if (c != nullptr && c != this)
+    {
+        midi->setLearnTarget (c);
+        showStatus (juce::String::fromUTF8 ("Elegido: ") + c->getComponentID()
+                    + juce::String::fromUTF8 (" -> ahora mueve o pulsa el control de tu controladora.  Esc para salir"));
+        statusMessageUntil = 0xffffffff;
+        repaint();
+    }
+}
+
+void MainComponent::paintOverChildren (juce::Graphics& g)
+{
+    if (midi == nullptr || ! midi->isLearning())
+        return;
+
+    // Atenuar todo y marcar: verde = ya asignado, naranja = control elegido
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.fillRect (getLocalBounds().withTrimmedTop (40));
+
+    std::function<void (juce::Component&)> mark = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (! child->isShowing())
+                continue;
+            const auto id = child->getComponentID();
+            if (id.isNotEmpty() && midi->isMapped (id))
+            {
+                g.setColour (juce::Colours::limegreen.withAlpha (0.8f));
+                g.drawRect (getLocalArea (child, child->getLocalBounds()), 2);
+            }
+            mark (*child);
+        }
+    };
+    mark (*this);
+
+    if (auto* target = midi->getLearnTarget())
+    {
+        const bool blink = (juce::Time::getMillisecondCounter() / 300) % 2 == 0;
+        g.setColour (juce::Colour (0xffe0912a).withAlpha (blink ? 1.0f : 0.5f));
+        g.drawRect (getLocalArea (target, target->getLocalBounds()).expanded (2), 3);
+    }
+}
+
+//==============================================================================
+void MainComponent::loadSample (int slot, const juce::File& file)
+{
+    if (sampler.loadFile (slot, file, formatManager))
+    {
+        saveSamplerSettings();
+        showStatus ("Sampler " + juce::String (slot + 1) + ": " + file.getFileName());
+    }
+    else
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "No se pudo cargar el sonido",
+                                                "Formato no soportado:\n" + file.getFileName());
+    }
+}
+
+void MainComponent::saveSamplerSettings()
+{
+    juce::XmlElement xml ("SAMPLER");
+    for (int i = 0; i < SamplerEngine::numSlots; ++i)
+    {
+        const auto& info = sampler.getInfo (i);
+        auto* e = xml.createNewChildElement ("SLOT");
+        e->setAttribute ("index", i);
+        e->setAttribute ("file", info.file.getFullPathName());
+        e->setAttribute ("loop", info.loop);
+    }
+    settings.setValue ("sampler", &xml);
+    settings.saveIfNeeded();
+}
+
+void MainComponent::restoreSamplerSettings()
+{
+    if (auto xml = settings.getXmlValue ("sampler"))
+        for (auto* e : xml->getChildIterator())
+        {
+            const int i = e->getIntAttribute ("index", -1);
+            if (i < 0 || i >= SamplerEngine::numSlots)
+                continue;
+
+            const juce::File f (e->getStringAttribute ("file"));
+            if (f.existsAsFile())
+                sampler.loadFile (i, f, formatManager);
+            sampler.setLoop (i, e->getBoolAttribute ("loop"));
+        }
 }
 
 void MainComponent::showAudioSettings()
@@ -240,7 +505,21 @@ void MainComponent::paint (juce::Graphics& g)
                 + juce::String (juce::roundToInt (device->getOutputLatencyInSamples() * 1000.0 / device->getCurrentSampleRate()))
                 + " ms";
     status += "   |   " + juce::Time::getCurrentTime().formatted ("%H:%M");
-    g.drawText (status, statusArea, juce::Justification::centred);
+
+    if (statusMessage.isNotEmpty() && juce::Time::getMillisecondCounter() < statusMessageUntil)
+    {
+        g.setColour (midi != nullptr && midi->isLearning() ? juce::Colour (0xffe0912a) : DJColours::text);
+        g.drawText (statusMessage, statusArea, juce::Justification::centred, true);
+    }
+    else
+    {
+        g.drawText (status, statusArea, juce::Justification::centred);
+    }
+
+    // Luz de actividad MIDI
+    const bool activity = midi != nullptr && juce::Time::getMillisecondCounter() - midi->getLastActivity() < 150;
+    g.setColour (activity ? juce::Colours::limegreen : juce::Colours::white.withAlpha (0.12f));
+    g.fillEllipse (midiLedArea.toFloat());
 
     g.drawText ("MASTER", masterLabelArea, juce::Justification::centredRight);
 }
@@ -251,6 +530,11 @@ void MainComponent::resized()
 
     auto top = area.removeFromTop (40).reduced (10, 6);
     audioButton.setBounds (top.removeFromRight (80));
+    top.removeFromRight (6);
+    midiButton.setBounds (top.removeFromRight (64));
+    midiLedArea = top.removeFromRight (14).withSizeKeepingCentre (8, 8);
+    top.removeFromRight (6);
+    recButton.setBounds (top.removeFromRight (84));
     top.removeFromRight (14);
     masterVolume.setBounds (top.removeFromRight (180));
     masterLabelArea = top.removeFromRight (60);

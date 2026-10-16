@@ -8,7 +8,7 @@ namespace
     const char* const knobNames[] = { "GAIN", "HIGH", "MID", "LOW" };
 }
 
-MixerComponent::MixerComponent (MixerEngine& engine)
+MixerComponent::MixerComponent (MixerEngine& engine, SamplerEngine& sampler)
     : mixer (engine)
 {
     for (int i = 0; i < MixerEngine::numChannels; ++i)
@@ -47,6 +47,13 @@ MixerComponent::MixerComponent (MixerEngine& engine)
         s.headphones.onClick = [&s, &p] { p.pfl.store (s.headphones.getToggleState()); };
         addAndMakeVisible (s.headphones);
 
+        const juce::String id = i == 0 ? "A." : "B.";
+        const char* knobIds[] = { "gain", "high", "mid", "low" };
+        for (int k = 0; k < 4; ++k)
+            s.knobs[(size_t) k].setComponentID (id + knobIds[k]);
+        s.volume.setComponentID (id + "volume");
+        s.headphones.setComponentID (id + "pfl");
+
         s.meter = std::make_unique<VuMeter> (p.peakLeft, p.peakRight);
         addAndMakeVisible (*s.meter);
     }
@@ -60,7 +67,19 @@ MixerComponent::MixerComponent (MixerEngine& engine)
     crossfader.setColour (juce::Slider::thumbColourId, juce::Colours::white);
     crossfader.onValueChange = [this] { mixer.crossfader.store ((float) crossfader.getValue()); };
     crossfader.setTooltip ("Crossfader (doble clic: centro)");
+    crossfader.setComponentID ("crossfader");
     addAndMakeVisible (crossfader);
+
+    samplerVolume.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    samplerVolume.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    samplerVolume.setRange (0.0, 1.0);
+    samplerVolume.setValue (sampler.volume.load(), juce::dontSendNotification);
+    samplerVolume.setDoubleClickReturnValue (true, 0.8);
+    samplerVolume.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xffe0912a));
+    samplerVolume.setTooltip ("Volumen del sampler");
+    samplerVolume.setComponentID ("samplerVolume");
+    samplerVolume.onValueChange = [this, &sampler] { sampler.volume = (float) samplerVolume.getValue(); };
+    addAndMakeVisible (samplerVolume);
 
     for (auto* c : getChildren())
         c->setWantsKeyboardFocus (false);
@@ -94,6 +113,7 @@ void MixerComponent::paint (juce::Graphics& g)
             g.drawText (knobNames[k], s.labels[(size_t) k], juce::Justification::centred);
 
     g.drawText ("MASTER", masterLabel, juce::Justification::centred);
+    g.drawText ("SAMPLER", samplerLabel, juce::Justification::centred);
 
     g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
     g.setColour (deckA);
@@ -141,7 +161,13 @@ void MixerComponent::resized()
     layoutStrip (strips[0], faderA, knobsA, true);
     layoutStrip (strips[1], faderB, knobsB, false);
 
-    // Centro: vúmetro master
+    // Centro: volumen del sampler y vúmetro master
+    {
+        auto knobArea = area.removeFromTop (juce::jmin (56, area.getWidth()));
+        samplerLabel = area.removeFromTop (14);
+        samplerVolume.setBounds (knobArea.withSizeKeepingCentre (knobArea.getHeight(), knobArea.getHeight()));
+        area.removeFromTop (8);
+    }
     masterLabel = area.removeFromBottom (16);
     masterMeter->setBounds (area.withSizeKeepingCentre (juce::jmin (22, area.getWidth()), area.getHeight()).reduced (0, 4));
 }
