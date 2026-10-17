@@ -48,6 +48,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\CesarDJ_artefacts\Release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LEEME.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
+; Modelo de IA para los stems (Demucs v4, ~84 MB): funciona sin internet
+Source: "..\build\CesarDJ_artefacts\Release\models\ggml-model-htdemucs-4s-f16.bin"; DestDir: "{app}\models"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"

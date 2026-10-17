@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CesarDJ VERSION 0.7.0)
+project(CesarDJ VERSION 0.8.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,7 +36,38 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_MakeAvailable(JUCE soundtouch sqlite)
+# demucs.cpp: separación de stems con IA (Demucs v4 de Meta portado a C++, licencia MIT).
+# Solo se usa su código de inferencia (src/) y Eigen; se fija el commit exacto.
+FetchContent_Declare(
+    demucs
+    GIT_REPOSITORY https://github.com/sevagh/demucs.cpp.git
+    GIT_TAG        f1206e9adeea103aef4a636b9e62297cf1f8e34e
+    GIT_SUBMODULES "vendor/eigen"
+    SOURCE_SUBDIR  no-cmake
+)
+
+FetchContent_MakeAvailable(JUCE soundtouch sqlite demucs)
+
+file(GLOB DEMUCS_SOURCES ${demucs_SOURCE_DIR}/src/*.cpp)
+add_library(demucs STATIC ${DEMUCS_SOURCES})
+target_include_directories(demucs PUBLIC ${demucs_SOURCE_DIR}/src ${demucs_SOURCE_DIR}/vendor/eigen)
+target_compile_definitions(demucs PUBLIC _USE_MATH_DEFINES NOMINMAX)
+if (MSVC)
+    # Optimizado también al depurar: sin esto la IA sería decenas de veces más lenta
+    target_compile_options(demucs PRIVATE /W0 /O2 /Ob2 /bigobj /fp:fast)
+    target_compile_options(demucs PUBLIC /bigobj)
+endif()
+
+# Modelo de IA (htdemucs 4 fuentes, ~84 MB): se descarga una vez y se verifica su huella
+set(DEMUCS_MODEL "${CMAKE_BINARY_DIR}/models/ggml-model-htdemucs-4s-f16.bin")
+if (NOT EXISTS "${DEMUCS_MODEL}")
+    message(STATUS "Descargando el modelo de stems (84 MB)...")
+    file(DOWNLOAD
+        "https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/main/ggml-model-htdemucs-4s-f16.bin"
+        "${DEMUCS_MODEL}"
+        EXPECTED_HASH SHA256=72b17c42d308982ddb5069bc3bf48b81a5aac4cb6516e4366c0fa7cef6df0064
+        SHOW_PROGRESS)
+endif()
 
 add_library(sqlite3 STATIC ${sqlite_SOURCE_DIR}/sqlite3.c)
 target_include_directories(sqlite3 PUBLIC ${sqlite_SOURCE_DIR})
@@ -94,7 +125,8 @@ target_sources(CesarDJ PRIVATE
     Source/Recorder.cpp
     Source/MidiController.cpp
     Source/Branding.cpp
-    Source/Automix.cpp)
+    Source/Automix.cpp
+    Source/StemSeparator.cpp)
 
 target_compile_definitions(CesarDJ PRIVATE
     JUCE_WEB_BROWSER=0
@@ -112,6 +144,7 @@ target_link_libraries(CesarDJ
         CesarDJData
         soundtouch
         sqlite3
+        demucs
         juce::juce_audio_utils
         juce::juce_dsp
         juce::juce_audio_devices
@@ -121,3 +154,9 @@ target_link_libraries(CesarDJ
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# El modelo de stems va junto al .exe (carpeta models\)
+add_custom_command(TARGET CesarDJ POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:CesarDJ>/models"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEMUCS_MODEL}" "$<TARGET_FILE_DIR:CesarDJ>/models/"
+    VERBATIM)

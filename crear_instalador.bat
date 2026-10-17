@@ -24,8 +24,8 @@ if not exist "%ISCC%" (
 if not exist dist mkdir dist
 "%ISCC%" /Q /DAppVersion=%VERSION% installer\CesarDJ.iss || goto :error
 
-rem 4) Version portable (un zip con el .exe y el LEEME)
-powershell -NoProfile -Command "Compress-Archive -Force -Path 'build\CesarDJ_artefacts\Release\CesarDJ.exe','LEEME.txt' -DestinationPath 'dist\CesarDJ-%VERSION%-portable.zip'" || goto :error
+rem 4) Version portable (zip con el .exe, el modelo de IA de stems y el LEEME)
+powershell -NoProfile -Command "Compress-Archive -Force -Path 'build\CesarDJ_artefacts\Release\CesarDJ.exe','build\CesarDJ_artefacts\Release\models','LEEME.txt' -DestinationPath 'dist\CesarDJ-%VERSION%-portable.zip'" || goto :error
 
 echo.
 echo Listo:

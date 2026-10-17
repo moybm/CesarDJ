@@ -6,6 +6,7 @@ using namespace DJColours;
 namespace
 {
     const char* const knobNames[] = { "GAIN", "HIGH", "MID", "LOW" };
+    const char* const stemNames[] = { "VOCAL", "INSTRU", "BEAT" };
 }
 
 MixerComponent::MixerComponent (MixerEngine& engine, SamplerEngine& sampler)
@@ -54,6 +55,23 @@ MixerComponent::MixerComponent (MixerEngine& engine, SamplerEngine& sampler)
         s.volume.setComponentID (id + "volume");
         s.headphones.setComponentID (id + "pfl");
 
+        const char* stemIds[] = { "vocal", "instru", "beat" };
+        for (int k = 0; k < 3; ++k)
+        {
+            auto& knob = s.stemKnobs[(size_t) k];
+            knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            knob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            knob.setRange (-1.0, 1.0);
+            knob.setValue (0.0, juce::dontSendNotification);
+            knob.setDoubleClickReturnValue (true, 0.0);
+            knob.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xffb05cf0));
+            DJLookAndFeel::setBipolar (knob);
+            knob.setComponentID (id + stemIds[k]);
+            knob.setTooltip (juce::String::fromUTF8 ("Izquierda: quita este stem | Derecha: lo aísla (baja los demás) | Doble clic: normal"));
+            knob.onValueChange = [this, &knob, i, k] { if (onStemChange) onStemChange (i, k, (float) knob.getValue()); };
+            addChildComponent (knob);
+        }
+
         s.meter = std::make_unique<VuMeter> (p.peakLeft, p.peakRight);
         addAndMakeVisible (*s.meter);
     }
@@ -81,10 +99,43 @@ MixerComponent::MixerComponent (MixerEngine& engine, SamplerEngine& sampler)
     samplerVolume.onValueChange = [this, &sampler] { sampler.volume = (float) samplerVolume.getValue(); };
     addAndMakeVisible (samplerVolume);
 
+    eqButton.setClickingTogglesState (false);
+    stemsButton.setClickingTogglesState (false);
+    eqButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff4a5260));
+    stemsButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffb05cf0).darker (0.3f));
+    eqButton.setTooltip ("Mandos de EQ: HIGH / MID / LOW");
+    stemsButton.setTooltip (juce::String::fromUTF8 ("Mandos de stems: VOCAL / INSTRU / BEAT (separación de la canción)"));
+    eqButton.onClick = [this] { setStemMode (false); };
+    stemsButton.onClick = [this] { setStemMode (true); };
+    eqButton.setComponentID ("mixerEq");
+    stemsButton.setComponentID ("mixerStems");
+    addAndMakeVisible (eqButton);
+    addAndMakeVisible (stemsButton);
+    setStemMode (false);
+
     for (auto* c : getChildren())
         c->setWantsKeyboardFocus (false);
 
     startTimerHz (4);
+}
+
+void MixerComponent::setStemMode (bool shouldUseStems)
+{
+    stemMode = shouldUseStems;
+    eqButton.setToggleState (! stemMode, juce::dontSendNotification);
+    stemsButton.setToggleState (stemMode, juce::dontSendNotification);
+
+    for (auto& s : strips)
+    {
+        for (int k = 1; k < 4; ++k)
+            s.knobs[(size_t) k].setVisible (! stemMode);
+        for (auto& k : s.stemKnobs)
+            k.setVisible (stemMode);
+    }
+
+    if (onModeChanged != nullptr)
+        onModeChanged (stemMode);
+    repaint();
 }
 
 void MixerComponent::timerCallback()
@@ -94,6 +145,9 @@ void MixerComponent::timerCallback()
     for (auto& s : strips)
         s.headphones.setTooltip (hasCue ? juce::String ("Pre-escucha por auriculares (salidas 3-4)")
                                         : juce::String ("Para usar auriculares elige en Audio... una tarjeta con 4 salidas"));
+
+    if (stemMode)
+        repaint (titleArea);
 }
 
 void MixerComponent::paint (juce::Graphics& g)
@@ -102,15 +156,24 @@ void MixerComponent::paint (juce::Graphics& g)
 
     g.setColour (inset);
     g.fillRect (titleArea);
-    g.setColour (DJColours::text);
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText ("MEZCLADOR", titleArea, juce::Justification::centred);
+    // Estado de los stems de cada canal (IA lista, IA trabajando, separación rápida)
+    if (stemMode && stemStatus != nullptr)
+    {
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const auto st = stemStatus (ch);
+            g.setColour (st == "IA" ? play : st.startsWith ("IA") ? cue : textDim);
+            g.drawText (st, ch == 0 ? statusA : statusB,
+                        ch == 0 ? juce::Justification::centredLeft : juce::Justification::centredRight);
+        }
+    }
 
     g.setColour (textDim);
     g.setFont (juce::FontOptions (10.0f));
     for (auto& s : strips)
         for (int k = 0; k < 4; ++k)
-            g.drawText (knobNames[k], s.labels[(size_t) k], juce::Justification::centred);
+            g.drawText (stemMode && k > 0 ? stemNames[k - 1] : knobNames[k], s.labels[(size_t) k], juce::Justification::centred);
 
     g.drawText ("MASTER", masterLabel, juce::Justification::centred);
     g.drawText ("SAMPLER", samplerLabel, juce::Justification::centred);
@@ -126,6 +189,14 @@ void MixerComponent::resized()
 {
     auto area = getLocalBounds();
     titleArea = area.removeFromTop (28);
+    {
+        auto t = titleArea.reduced (8, 4);
+        auto buttons = t.withSizeKeepingCentre (128, t.getHeight());
+        eqButton.setBounds (buttons.removeFromLeft (52));
+        stemsButton.setBounds (buttons.withTrimmedLeft (4));
+        statusA = t.withRight (buttons.getX() - 60);
+        statusB = t.withLeft (buttons.getRight() + 4);
+    }
     area = area.reduced (10, 10);
 
     auto xfRow = area.removeFromBottom (40);
@@ -150,6 +221,8 @@ void MixerComponent::resized()
             auto row = knobCol.removeFromTop (rowH);
             s.labels[(size_t) k] = row.removeFromBottom (13);
             s.knobs[(size_t) k].setBounds (row.withSizeKeepingCentre (row.getHeight(), row.getHeight()));
+            if (k > 0)
+                s.stemKnobs[(size_t) (k - 1)].setBounds (s.knobs[(size_t) k].getBounds());
         }
     };
 

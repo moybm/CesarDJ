@@ -33,6 +33,7 @@ public:
     void loadFile (const juce::File& file)          { loadFile (file, TrackInfo()); }
     bool isLoading() const                          { return loading; }
     const Track* getTrack() const                   { return track.get(); }
+    std::shared_ptr<Track> getTrackShared() const   { return track; }
     std::function<void()> onTrackChanged;           // carga terminada, análisis terminado o error
     std::function<void (const juce::File&)> onLoadFailed;
     std::function<void (const Track&)> onAnalysed;     // BPM recién calculado (para guardarlo)
@@ -101,6 +102,10 @@ public:
     std::atomic<float> fxFilter { 0.0f }, fxAmount2 { 0.0f }, fxAmount3 { 0.0f };
     std::atomic<int> fxType2 { DeckFx::flanger }, fxType3 { DeckFx::cut };
 
+    //== Stems: VOCAL, INSTRU, BEAT. -1 = quitarlo, 0 = normal, +1 = aislarlo (baja los demás) ==
+    enum Stem { vocal = 0, instru, beat, numStems };
+    std::atomic<float> stemKnob[numStems] { { 0.0f }, { 0.0f }, { 0.0f } };
+
     //== AudioSource ================================================================
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;
     void releaseResources() override {}
@@ -124,6 +129,8 @@ private:
     void readFrames (float* L, float* R, int n, double step);
     void readOne (double step, float& l, float& r);
     void sampleAt (double p, float& l, float& r) const;
+    void sampleAtStems (double p, float& l, float& r);
+    void updateStemGains();
     void jumpTo (double newPos);
 
     juce::AudioFormatManager& formatManager;
@@ -163,6 +170,10 @@ private:
     int xfRemain = 0;
     static constexpr int xfLength = 96;
     juce::SmoothedValue<float> playGain { 0.0f };
+
+    StemData* audioStems = nullptr;             // stems de la pista que suena (o nullptr)
+    bool stemsActive = false;
+    std::array<juce::SmoothedValue<float>, numStems> stemGain;
 
     soundtouch::SoundTouch stretcher;
     bool stretcherInUse = false;

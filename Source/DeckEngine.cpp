@@ -1,5 +1,6 @@
 #include "DeckEngine.h"
 #include "TrackAnalyser.h"
+#include "StemSeparator.h"
 
 namespace
 {
@@ -62,13 +63,11 @@ void DeckEngine::loadFile (const juce::File& file, const TrackInfo& knownInfo)
         if (newTrack == nullptr)
             return;
 
-        // La canción ya se puede reproducir; ahora lo que falte: BPM/beatgrid y tonalidad
+        // La canción ya se puede reproducir; ahora lo que falte: BPM/beatgrid y tonalidad...
         const bool needGrid = ! newTrack->analysed.load();
         const bool needKey = knownInfo.camelot < 0;
         if (! needKey)
             newTrack->camelot = knownInfo.camelot;
-        if (! needGrid && ! needKey)
-            return;
 
         if (needGrid)
             TrackAnalyser::detectBeatgrid (*newTrack, cancelled);
@@ -78,13 +77,20 @@ void DeckEngine::loadFile (const juce::File& file, const TrackInfo& knownInfo)
             return;
 
         newTrack->analysed = true;
+        const bool analysedNow = needGrid || needKey;
 
-        juce::MessageManager::callAsync ([this, generation, alive, newTrack]
+        // ...y los stems: los de IA si ya están en caché; si no, los rápidos (la IA los mejora después)
+        if (auto cached = StemSeparator::loadCache (newTrack->file, newTrack->numSamples()))
+            newTrack->setStems (std::move (cached));
+        else if (auto fast = StemSeparator::separateFast (*newTrack, cancelled))
+            newTrack->setStems (std::move (fast));
+
+        juce::MessageManager::callAsync ([this, generation, alive, newTrack, analysedNow]
         {
             if (alive.expired() || generation != loadGeneration.load())
                 return;
 
-            if (onAnalysed != nullptr)
+            if (analysedNow && onAnalysed != nullptr)
                 onAnalysed (*newTrack);
             if (onTrackChanged != nullptr)
                 onTrackChanged();
@@ -457,6 +463,8 @@ void DeckEngine::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
     stretcherInUse = false;
 
     playGain.reset (sampleRate, 0.004);
+    for (auto& g : stemGain)
+        g.reset (sampleRate, 0.03);
     fx.prepare (sampleRate, maxChunk);
 }
 
@@ -560,8 +568,33 @@ void DeckEngine::getNextAudioBlock (const juce::AudioSourceChannelInfo& info)
                              : (aPlaying ? speedAtomic.load() * bend.load() : 0.0);
 }
 
+// Ganancia de cada stem a partir de los mandos: a la izquierda se quita, a la derecha se aísla
+void DeckEngine::updateStemGains()
+{
+    audioStems = audioTrack != nullptr ? audioTrack->stems.load() : nullptr;
+
+    float k[numStems];
+    for (int s = 0; s < numStems; ++s)
+        k[s] = juce::jlimit (-1.0f, 1.0f, stemKnob[s].load());
+
+    bool allUnity = true;
+    for (int s = 0; s < numStems; ++s)
+    {
+        float g = 1.0f + juce::jmin (0.0f, k[s]);
+        for (int o = 0; o < numStems; ++o)
+            if (o != s)
+                g *= 1.0f - juce::jmax (0.0f, k[o]);
+        stemGain[(size_t) s].setTargetValue (g);
+        allUnity = allUnity && g > 0.999f && ! stemGain[(size_t) s].isSmoothing();
+    }
+
+    stemsActive = audioStems != nullptr && ! allUnity;
+}
+
 void DeckEngine::renderChunk (float* L, float* R, int n)
 {
+    updateStemGains();
+
     const double srRatio = audioTrack->sampleRate / deviceRate;
     const double speed = speedAtomic.load() * bend.load();
     const double blockStartSeconds = pos / audioTrack->sampleRate;
@@ -663,12 +696,18 @@ void DeckEngine::readFrames (float* L, float* R, int n, double step)
 
 void DeckEngine::readOne (double step, float& l, float& r)
 {
-    sampleAt (pos, l, r);
+    if (stemsActive)
+        sampleAtStems (pos, l, r);
+    else
+        sampleAt (pos, l, r);
 
     if (xfRemain > 0)
     {
         float ol, orr;
-        sampleAt (xfPos, ol, orr);
+        if (stemsActive)
+            sampleAtStems (xfPos, ol, orr);
+        else
+            sampleAt (xfPos, ol, orr);
         const float a = (float) xfRemain / (float) xfLength;
         l = l * (1.0f - a) + ol * a;
         r = r * (1.0f - a) + orr * a;
@@ -705,6 +744,46 @@ void DeckEngine::jumpTo (double newPos)
     xfPos = pos;
     xfRemain = xfLength;
     pos = newPos;
+}
+
+namespace
+{
+    inline float hermite (const float* d, int k, float t)
+    {
+        const float xm1 = d[k - 1], x0 = d[k], x1 = d[k + 1], x2 = d[k + 2];
+        const float c1 = 0.5f * (x1 - xm1);
+        const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+        const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+        return ((c3 * t + c2) * t + c1) * t + x0;
+    }
+}
+
+// Mezcla de stems: instrumental = mezcla - voz - percusión, cada uno con su ganancia
+void DeckEngine::sampleAtStems (double p, float& l, float& r)
+{
+    const int num = audioTrack->numSamples();
+    const int i = (int) std::floor (p);
+    if (i < 1 || i + 2 >= num || audioStems->vocals.getNumSamples() < num)
+    {
+        sampleAt (p, l, r);
+        return;
+    }
+
+    const float t = (float) (p - i);
+    const float gv = stemGain[vocal].getNextValue();
+    const float gi = stemGain[instru].getNextValue();
+    const float gb = stemGain[beat].getNextValue();
+
+    float out[2];
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const float mix = hermite (audioTrack->audio.getReadPointer (ch), i, t);
+        const float voc = hermite (audioStems->vocals.getReadPointer (ch), i, t);
+        const float bt  = hermite (audioStems->beat.getReadPointer (ch), i, t);
+        out[ch] = gi * (mix - voc - bt) + gv * voc + gb * bt;
+    }
+    l = out[0];
+    r = out[1];
 }
 
 // Interpolación cúbica (Hermite) entre muestras: suena limpia con cualquier pitch o scratch

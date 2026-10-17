@@ -46,6 +46,26 @@ MainComponent::MainComponent()
         return deckA.getCamelot() >= 0 ? deckA.getCamelot() : deckB.getCamelot();
     };
 
+    // Stems: mandos del mezclador -> decks; estado de la IA en el mezclador
+    mixerView.onStemChange = [this] (int ch, int stem, float v) { (ch == 0 ? deckA : deckB).stemKnob[stem] = v; };
+    mixerView.stemStatus = [this] (int ch) -> juce::String
+    {
+        const auto* t = (ch == 0 ? deckA : deckB).getTrack();
+        if (t == nullptr)                       return {};
+        if (t->aiProgress.load() >= 0.0f)       return "IA " + juce::String (juce::roundToInt (t->aiProgress.load() * 100.0f)) + "%";
+        if (t->hasAiStems())                    return "IA";
+        if (t->stems.load() != nullptr)         return juce::String::fromUTF8 ("RÁPIDO");
+        if (! stemWorker.isAvailable())         return "SIN MODELO IA";
+        return "...";
+    };
+    mixerView.onModeChanged = [this] (bool stems) { settings.setValue ("mixerStems", stems); };
+    mixerView.setStemMode (settings.getBoolValue ("mixerStems", false));
+    browser.onPrepareStems = [this] (const juce::Array<juce::File>& files)
+    {
+        stemWorker.enqueueFiles (files);
+        showStatus ("Stems IA: " + juce::String (files.size()) + juce::String::fromUTF8 (" canción(es) en cola"));
+    };
+
     connectDeck (0, deckA, deckViewA);
     connectDeck (1, deckB, deckViewB);
 
@@ -167,6 +187,14 @@ void MainComponent::connectDeck (int index, DeckEngine& deck, DeckComponent& vie
                 hc[(size_t) i] = deck.getHotCue (i);
             library.setCues (t->file, deck.getCuePoint(), hc);
         }
+    };
+
+    // Cuando la canción está lista, la IA prepara sus stems de calidad (si no estaban en caché)
+    deck.onTrackChanged = [this, &deck]
+    {
+        if (! deck.isLoading())
+            if (auto t = deck.getTrackShared(); t != nullptr && t->stems.load() != nullptr && ! t->hasAiStems())
+                stemWorker.enqueue (t);
     };
 
     deck.onStartedPlaying = [this, &deck, index]
@@ -572,6 +600,11 @@ void MainComponent::paint (juce::Graphics& g)
     {
         g.setColour (DJColours::play);
         g.drawText (automix.getStatus(), statusArea, juce::Justification::centred, true);
+    }
+    else if (const auto stemStatus = stemWorker.getStatusText(); stemStatus.isNotEmpty())
+    {
+        g.setColour (juce::Colour (0xffb05cf0).brighter (0.3f));
+        g.drawText (stemStatus, statusArea, juce::Justification::centred, true);
     }
     else
     {

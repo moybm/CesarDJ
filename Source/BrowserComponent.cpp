@@ -505,6 +505,15 @@ void BrowserComponent::showTrackMenu (int row)
         m.addItem (juce::String::fromUTF8 ("Añadir a Automix"), [this, ids] { library.addToAutomix (ids); });
 
     m.addItem ("Volver a analizar BPM", [this, ids] { library.requeueAnalysis (ids); library.analysePending(); });
+    if (onPrepareStems != nullptr)
+    {
+        juce::Array<juce::File> files;
+        const auto sel = table.getSelectedRows();
+        for (int i = 0; i < sel.size(); ++i)
+            if (sel[i] < (int) rows.size())
+                files.add (rows[(size_t) sel[i]].file);
+        m.addItem ("Preparar stems con IA (" + juce::String (files.size()) + ")", [this, files] { onPrepareStems (files); });
+    }
     m.addItem ("Mostrar en el Explorador", [file] { file.revealToUser(); });
 
     if (view.type != LibraryView::Type::history)

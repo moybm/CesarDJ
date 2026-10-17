@@ -23,6 +23,7 @@ public:
     std::function<juce::File (int deckIndex)> loadedFile;                  // para marcar lo cargado en A/B
     std::function<double()> referenceBpm;                                  // BPM del deck que suena (filtro)
     std::function<int()> referenceKey;                                     // tonalidad del deck que suena
+    std::function<void (const juce::Array<juce::File>&)> onPrepareStems;   // stems con IA en lote
 
     void markPlayedThisSession (const juce::File& file);
     void focusSearch()                          { searchBox.grabKeyboardFocus(); }

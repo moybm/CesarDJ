@@ -41,10 +41,18 @@ public:
     void setEqLow (int channel, float value)         { strips[(size_t) channel].knobs[3].setValue (value, juce::sendNotificationSync); }
     void setChannelVolume (int channel, float value) { strips[(size_t) channel].volume.setValue (value, juce::sendNotificationSync); }
 
+    // Modo de los mandos: EQ (HIGH / MID / LOW) o STEMS (VOCAL / INSTRU / BEAT)
+    void setStemMode (bool shouldUseStems);
+    bool isStemMode() const                          { return stemMode; }
+    std::function<void (int channel, int stem, float value)> onStemChange;
+    std::function<juce::String (int channel)> stemStatus;     // "IA", "IA 40%", "RAPIDO"...
+    std::function<void (bool)> onModeChanged;
+
 private:
     struct Strip
     {
         std::array<juce::Slider, 4> knobs;          // GAIN, HIGH, MID, LOW
+        std::array<juce::Slider, 3> stemKnobs;      // VOCAL, INSTRU, BEAT (en el sitio de HIGH/MID/LOW)
         std::array<juce::Rectangle<int>, 4> labels;
         juce::Slider volume { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
         HeadphoneButton headphones;
@@ -59,7 +67,9 @@ private:
     juce::Slider samplerVolume;
     juce::Rectangle<int> samplerLabel;
     std::unique_ptr<VuMeter> masterMeter;
-    juce::Rectangle<int> titleArea, masterLabel, xfLabelA, xfLabelB;
+    juce::Rectangle<int> titleArea, masterLabel, xfLabelA, xfLabelB, statusA, statusB;
+    juce::TextButton eqButton { "EQ" }, stemsButton { "STEMS" };
+    bool stemMode = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerComponent)
 };

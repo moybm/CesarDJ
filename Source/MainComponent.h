@@ -13,6 +13,7 @@
 #include "MidiController.h"
 #include "Branding.h"
 #include "Automix.h"
+#include "StemSeparator.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -66,6 +67,7 @@ private:
     juce::AudioFormatManager formatManager;
     const bool formatsReady = [this] { formatManager.registerBasicFormats(); return true; }();
 
+    StemWorker stemWorker { formatManager };
     Library library { settings.getFile().getSiblingFile ("library.db"), formatManager.getWildcardForAllFormats() };
 
     DeckEngine deckA { formatManager }, deckB { formatManager };

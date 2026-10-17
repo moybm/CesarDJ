@@ -50,9 +50,17 @@ TRUCOS
     con clic derecho en una lista > "Enviar lista a Automix". Iguala el BPM,
     alinea los beats e intercambia los graves. Clic derecho en AUTOMIX:
     duracion de la transicion (4-32 beats) y "mezclar ahora".
+  - STEMS: boton STEMS del mezclador. Los mandos pasan a VOCAL / INSTRU /
+    BEAT: a la izquierda quitan ese elemento, a la derecha lo aislan.
+    Al cargar una cancion hay stems rapidos en segundos; la IA (Demucs)
+    prepara en segundo plano los de calidad y los cambia al terminar
+    (en el mezclador: "IA 40%" -> "IA"). Tarda varios minutos por cancion
+    la primera vez; despues se guardan en %LOCALAPPDATA%\CesarDJ\Stems
+    y cargan al instante. Clic derecho en canciones > "Preparar stems con
+    IA" para dejarlas listas por adelantado (por ejemplo, de noche).
   - REC graba la sesion en WAV de 24 bits.
   - MIDI: conecta tu controladora, pulsa Ctrl+M, haz clic en un control de
     la pantalla y muevelo en la controladora.
   - Clic en el logo de arriba a la izquierda: version y carpeta de datos.
 
-Hecho con JUCE, SoundTouch (LGPL) y SQLite.
+Hecho con JUCE, SoundTouch (LGPL), SQLite y demucs.cpp (Demucs v4, MIT).

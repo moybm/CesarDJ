@@ -8,6 +8,13 @@ struct WaveBin
     juce::uint8 low = 0, mid = 0, high = 0;
 };
 
+// Stems de una canción: voz y percusión. Lo instrumental = mezcla - voz - percusión.
+struct StemData
+{
+    juce::AudioBuffer<float> vocals, beat;      // estéreo, mismo largo y frecuencia que Track::audio
+    bool ai = false;                            // true = Demucs (IA); false = separación rápida
+};
+
 // Canción cargada en memoria + su análisis.
 // El audio y la forma de onda se rellenan antes de publicar la pista; el BPM llega después (analysed = true).
 struct Track
@@ -25,6 +32,20 @@ struct Track
     std::atomic<bool> analysed { false };
     std::atomic<int> camelot { -1 };    // tonalidad (ver Camelot.h), -1 = desconocida
 
+    // Stems: se publican con un puntero atómico (el hilo de audio lo lee sin bloquear).
+    // Las versiones anteriores se guardan hasta que se libera la canción, así nunca se borran en uso.
+    std::atomic<StemData*> stems { nullptr };
+    std::atomic<float> aiProgress { -1.0f };   // 0..1 mientras la IA trabaja en esta canción
+
+    void setStems (std::unique_ptr<StemData> s)
+    {
+        const juce::ScopedLock sl (stemLock);
+        stemStorage.push_back (std::move (s));
+        stems = stemStorage.back().get();
+    }
+
+    bool hasAiStems() const             { auto* s = stems.load(); return s != nullptr && s->ai; }
+
     int numSamples() const              { return audio.getNumSamples(); }
     double getLength() const            { return audio.getNumSamples() / sampleRate; }
     bool hasBeatgrid() const            { return analysed.load() && bpm > 0.0; }
@@ -33,6 +54,9 @@ struct Track
     // Posición en beats (puede ser negativa antes del primer beat)
     double beatAt (double seconds) const { return (seconds - firstBeat) / beatLength(); }
     double timeOfBeat (double beat) const { return firstBeat + beat * beatLength(); }
+
+    juce::CriticalSection stemLock;
+    std::vector<std::unique_ptr<StemData>> stemStorage;
 
     double nearestBeat (double seconds) const
     {
