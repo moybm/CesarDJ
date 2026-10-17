@@ -12,6 +12,7 @@
 #include "Recorder.h"
 #include "MidiController.h"
 #include "Branding.h"
+#include "Automix.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -43,6 +44,7 @@ private:
     DeckEngine::TrackInfo infoFor (const juce::File& file);
 
     void toggleRecording();
+    void showAutomixMenu();
     void showMidiMenu();
     void setLearning (bool shouldLearn);
     void learnClick (const juce::MouseEvent& e);
@@ -78,7 +80,8 @@ private:
     BrowserComponent browser { library, settings };
 
     juce::Slider masterVolume { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::TextButton audioButton { "AUDIO" }, midiButton { "MIDI" }, recButton { "REC" };
+    juce::TextButton audioButton { "AUDIO" }, midiButton { "MIDI" }, recButton { "REC" }, automixButton { "AUTOMIX" };
+    AutomixController automix { library, { &deckA, &deckB }, { &deckViewA, &deckViewB }, mixerView };
     std::unique_ptr<MidiController> midi;
     ClickListener learnListener;
     juce::String statusMessage;

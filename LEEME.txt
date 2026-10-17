@@ -45,6 +45,11 @@ TRUCOS
   - Pads en modo SAMPLER: clic derecho para cargar tu propio sonido.
   - Plato: centro = scratch, aro exterior = empujar/frenar, rueda del raton
     = ajuste fino.
+  - AUTOMIX: mezcla sola la cola "Automix" del navegador. Anade canciones
+    con clic derecho > "Anadir a Automix", arrastrandolas sobre "Automix" o
+    con clic derecho en una lista > "Enviar lista a Automix". Iguala el BPM,
+    alinea los beats e intercambia los graves. Clic derecho en AUTOMIX:
+    duracion de la transicion (4-32 beats) y "mezclar ahora".
   - REC graba la sesion en WAV de 24 bits.
   - MIDI: conecta tu controladora, pulsa Ctrl+M, haz clic en un control de
     la pantalla y muevelo en la controladora.

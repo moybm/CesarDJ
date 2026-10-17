@@ -44,6 +44,7 @@ public:
     std::function<void (int slot, const juce::File&)> onLoadSample;
     std::function<void()> onSamplerChanged;
     void sync (bool alignPhase);
+    void setPitchValue (double percent);            // amplía el rango del pitch si hace falta
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -71,7 +72,6 @@ private:
     void tapTempo();
     void showBeatgridMenu();
     int samplerSlot (int pad) const             { return index * 4 + pad; }
-    void setPitchValue (double percent);
     void cyclePitchRange();
     void setDragHighlight (bool on)                                               { dragHighlight = on; repaint(); }
     void paintHeader (juce::Graphics& g);

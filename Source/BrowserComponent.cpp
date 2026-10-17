@@ -180,7 +180,8 @@ void BrowserComponent::refreshRows()
 
     // Recordar la selección para restaurarla
     std::set<juce::int64> selectedKeys;
-    const bool byEntry = view.type == LibraryView::Type::playlist || view.type == LibraryView::Type::history;
+    const bool byEntry = view.type == LibraryView::Type::playlist || view.type == LibraryView::Type::history
+                         || view.type == LibraryView::Type::automix;
     const auto sel = table.getSelectedRows();
     for (int i = 0; i < sel.size(); ++i)
         if (sel[i] < (int) rows.size())
@@ -397,6 +398,12 @@ void BrowserComponent::deleteKeyPressed (int)
         return;
     }
 
+    if (view.type == LibraryView::Type::automix)
+    {
+        library.removeFromAutomix (selectedEntryIds());
+        return;
+    }
+
     if (view.type == LibraryView::Type::history)
         return;
 
@@ -492,6 +499,11 @@ void BrowserComponent::showTrackMenu (int row)
     if (view.type == LibraryView::Type::playlist)
         m.addItem ("Quitar de esta lista", [this, entries] { library.removeFromPlaylist (entries); });
 
+    if (view.type == LibraryView::Type::automix)
+        m.addItem ("Quitar de Automix", [this, entries] { library.removeFromAutomix (entries); });
+    else
+        m.addItem (juce::String::fromUTF8 ("Añadir a Automix"), [this, ids] { library.addToAutomix (ids); });
+
     m.addItem ("Volver a analizar BPM", [this, ids] { library.requeueAnalysis (ids); library.analysePending(); });
     m.addItem ("Mostrar en el Explorador", [file] { file.revealToUser(); });
 
@@ -554,8 +566,15 @@ void BrowserComponent::paint (juce::Graphics& g)
     g.drawText (viewTitle, titleArea, juce::Justification::centredLeft, true);
     g.setColour (textDim);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String ((int) rows.size()) + (rows.size() == 1 ? juce::String::fromUTF8 (" canción") : " canciones"),
-                titleArea, juce::Justification::centredRight);
+    juce::String countText = juce::String ((int) rows.size()) + (rows.size() == 1 ? juce::String::fromUTF8 (" canción") : " canciones");
+    if (view.type == LibraryView::Type::automix && ! rows.empty())
+    {
+        double total = 0.0;
+        for (auto& r : rows)
+            total += r.duration;
+        countText += "  -  " + juce::String (juce::roundToInt (total / 60.0)) + " min";
+    }
+    g.drawText (countText, titleArea, juce::Justification::centredRight);
 
     // Estado del trabajo en segundo plano
     if (statusText.isNotEmpty())

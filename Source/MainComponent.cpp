@@ -77,6 +77,20 @@ MainComponent::MainComponent()
     recButton.setTooltip (juce::String::fromUTF8 ("Graba la sesión (salida master) en WAV de 24 bits, en Música\\CesarDJ Grabaciones"));
     addAndMakeVisible (recButton);
 
+    automixButton.setWantsKeyboardFocus (false);
+    automixButton.setColour (juce::TextButton::buttonOnColourId, DJColours::play.darker (0.3f));
+    automixButton.setTooltip (juce::String::fromUTF8 ("Mezcla sola la cola de Automix (árbol del navegador). Clic derecho: duración de la transición, mezclar ahora..."));
+    automixButton.onClick = [this]
+    {
+        if (juce::ModifierKeys::getCurrentModifiers().isPopupMenu())
+            showAutomixMenu();
+        else
+            automix.setEnabled (! automix.isEnabled());
+    };
+    addAndMakeVisible (automixButton);
+    automix.setTransitionBeats (settings.getIntValue ("automixBeats", 16));
+    automix.onMessage = [this] (const juce::String& msg) { showStatus (msg); };
+
     deckViewA.onLoadSample = deckViewB.onLoadSample = [this] (int slot, const juce::File& f) { loadSample (slot, f); };
     deckViewA.onSamplerChanged = deckViewB.onSamplerChanged = [this] { saveSamplerSettings(); };
     restoreSamplerSettings();
@@ -105,6 +119,8 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    automix.setEnabled (false);
+    settings.setValue ("automixBeats", automix.getTransitionBeats());
     setLearning (false);
     midi = nullptr;
     recorder.stop();
@@ -280,6 +296,7 @@ void MainComponent::timerCallback()
     }
 
     midiButton.setToggleState (midi != nullptr && midi->isLearning(), juce::dontSendNotification);
+    automixButton.setToggleState (automix.isEnabled(), juce::dontSendNotification);
 
     if (midi != nullptr && midi->isLearning())
         repaint();                       // resalte del control elegido
@@ -297,6 +314,24 @@ void MainComponent::showStatus (const juce::String& message)
 {
     statusMessage = message;
     statusMessageUntil = juce::Time::getMillisecondCounter() + 3500;
+}
+
+void MainComponent::showAutomixMenu()
+{
+    juce::PopupMenu m;
+    m.addItem (automix.isEnabled() ? "Detener Automix" : "Iniciar Automix", [this] { automix.setEnabled (! automix.isEnabled()); });
+    m.addItem ("Mezclar ahora con la siguiente", automix.isEnabled(), false, [this] { automix.mixNow(); });
+    m.addSeparator();
+
+    juce::PopupMenu lengths;
+    for (int beats : { 4, 8, 16, 32 })
+        lengths.addItem (juce::String (beats) + " beats", true, automix.getTransitionBeats() == beats,
+                         [this, beats] { automix.setTransitionBeats (beats); settings.setValue ("automixBeats", beats); });
+    m.addSubMenu (juce::String::fromUTF8 ("Duración de la transición"), lengths);
+    m.addSeparator();
+    m.addItem ("Vaciar la cola de Automix", [this] { library.clearAutomix(); });
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (automixButton));
 }
 
 void MainComponent::toggleRecording()
@@ -533,6 +568,11 @@ void MainComponent::paint (juce::Graphics& g)
         g.setColour (midi != nullptr && midi->isLearning() ? juce::Colour (0xffe0912a) : DJColours::text);
         g.drawText (statusMessage, statusArea, juce::Justification::centred, true);
     }
+    else if (automix.isEnabled())
+    {
+        g.setColour (DJColours::play);
+        g.drawText (automix.getStatus(), statusArea, juce::Justification::centred, true);
+    }
     else
     {
         g.drawText (status, statusArea, juce::Justification::centred);
@@ -557,6 +597,8 @@ void MainComponent::resized()
     midiLedArea = top.removeFromRight (14).withSizeKeepingCentre (8, 8);
     top.removeFromRight (6);
     recButton.setBounds (top.removeFromRight (84));
+    top.removeFromRight (6);
+    automixButton.setBounds (top.removeFromRight (96));
     top.removeFromRight (14);
     masterVolume.setBounds (top.removeFromRight (180));
     masterLabelArea = top.removeFromRight (60);

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CesarDJ VERSION 0.6.0)
+project(CesarDJ VERSION 0.7.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,7 +93,8 @@ target_sources(CesarDJ PRIVATE
     Source/SamplerEngine.cpp
     Source/Recorder.cpp
     Source/MidiController.cpp
-    Source/Branding.cpp)
+    Source/Branding.cpp
+    Source/Automix.cpp)
 
 target_compile_definitions(CesarDJ PRIVATE
     JUCE_WEB_BROWSER=0

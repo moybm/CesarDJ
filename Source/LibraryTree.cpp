@@ -5,7 +5,7 @@ using namespace DJColours;
 
 namespace
 {
-    enum class Kind { root, all, recent, history, playlistsHeader, playlist, foldersHeader, folder };
+    enum class Kind { root, all, recent, history, automix, playlistsHeader, playlist, foldersHeader, folder };
 
     // Iconos dibujados (no dependen de las fuentes del sistema)
     void drawIcon (juce::Graphics& g, Kind kind, juce::Rectangle<float> r, juce::Colour c)
@@ -45,6 +45,19 @@ namespace
             {
                 g.fillRoundedRectangle (cx - 8.0f, cy - 6.0f, 7.0f, 4.0f, 1.0f);
                 g.fillRoundedRectangle (cx - 8.0f, cy - 4.0f, 16.0f, 11.0f, 1.5f);
+                break;
+            }
+            case Kind::automix:
+            {
+                // Dos flechas que se cruzan (mezcla automática)
+                juce::Path p;
+                p.startNewSubPath (cx - 8.0f, cy + 5.0f);
+                p.cubicTo (cx - 2.0f, cy + 5.0f, cx + 2.0f, cy - 5.0f, cx + 8.0f, cy - 5.0f);
+                p.startNewSubPath (cx - 8.0f, cy - 5.0f);
+                p.cubicTo (cx - 2.0f, cy - 5.0f, cx + 2.0f, cy + 5.0f, cx + 8.0f, cy + 5.0f);
+                g.strokePath (p, juce::PathStrokeType (1.8f));
+                g.fillRect (cx + 6.0f, cy - 7.0f, 2.5f, 4.5f);
+                g.fillRect (cx + 6.0f, cy + 2.5f, 2.5f, 4.5f);
                 break;
             }
             case Kind::root:
@@ -88,6 +101,7 @@ public:
                : kind == Kind::history  ? LibraryView::Type::history
                : kind == Kind::playlist ? LibraryView::Type::playlist
                : kind == Kind::folder   ? LibraryView::Type::folder
+               : kind == Kind::automix  ? LibraryView::Type::automix
                                         : LibraryView::Type::all;
         v.playlistId = playlistId;
         v.folder = folder;
@@ -111,6 +125,7 @@ public:
                               : kind == Kind::folder   ? juce::Colour (0xffe8c33a)
                               : kind == Kind::all      ? deckA
                               : kind == Kind::history  ? cue
+                              : kind == Kind::automix  ? play
                                                        : textDim;
         drawIcon (g, kind, area.removeFromLeft (24).toFloat(), header ? textDim : iconColour);
 
@@ -149,7 +164,7 @@ public:
     // Soltar canciones del navegador sobre una lista -> se añaden
     bool isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& d) override
     {
-        return kind == Kind::playlist && d.description.toString().contains ("|ids:");
+        return (kind == Kind::playlist || kind == Kind::automix) && d.description.toString().contains ("|ids:");
     }
 
     void itemDropped (const juce::DragAndDropTarget::SourceDetails& d, int) override
@@ -158,7 +173,10 @@ public:
         for (auto& s : juce::StringArray::fromTokens (d.description.toString().fromFirstOccurrenceOf ("|ids:", false, false), ",", ""))
             ids.add (s.getLargeIntValue());
 
-        tree.library.addToPlaylist (playlistId, ids);
+        if (kind == Kind::automix)
+            tree.library.addToAutomix (ids);
+        else
+            tree.library.addToPlaylist (playlistId, ids);
     }
 
 private:
@@ -185,6 +203,7 @@ private:
                 const auto id = playlistId;
                 const auto name = label;
                 m.addItem ("Renombrar...", [this] { rename(); });
+                m.addItem ("Enviar lista a Automix", [&lib, id] { lib.addPlaylistToAutomix (id); });
                 m.addItem ("Eliminar lista", [&lib, id, name]
                 {
                     juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Eliminar lista",
@@ -216,6 +235,10 @@ private:
                         juce::String::fromUTF8 ("Se borrará el historial de reproducciones."), "Borrar", "Cancelar", nullptr,
                         juce::ModalCallbackFunction::create ([&lib] (int r) { if (r == 1) lib.clearHistory(); }));
                 });
+                break;
+
+            case Kind::automix:
+                m.addItem ("Vaciar Automix", [&lib] { lib.clearAutomix(); });
                 break;
 
             case Kind::all:
@@ -266,6 +289,7 @@ void LibraryTree::refresh()
     newRoot->addSubItem (new LibraryTreeItem (*this, Kind::all, "Todas las canciones", 0, {}, library.countTracks()));
     newRoot->addSubItem (new LibraryTreeItem (*this, Kind::recent, juce::String::fromUTF8 ("Añadidas recientemente")));
     newRoot->addSubItem (new LibraryTreeItem (*this, Kind::history, "Historial"));
+    newRoot->addSubItem (new LibraryTreeItem (*this, Kind::automix, "Automix", 0, {}, library.automixCount()));
 
     auto* lists = new LibraryTreeItem (*this, Kind::playlistsHeader, "Listas");
     for (auto& p : library.getPlaylists())

@@ -36,6 +36,11 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    // Para el Automix: mueven los controles en pantalla (y con ellos el audio)
+    void setCrossfader (float value)                 { crossfader.setValue (value, juce::sendNotificationSync); }
+    void setEqLow (int channel, float value)         { strips[(size_t) channel].knobs[3].setValue (value, juce::sendNotificationSync); }
+    void setChannelVolume (int channel, float value) { strips[(size_t) channel].volume.setValue (value, juce::sendNotificationSync); }
+
 private:
     struct Strip
     {

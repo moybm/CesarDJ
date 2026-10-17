@@ -292,6 +292,20 @@ void Library::migrate()
         version = 2;
     }
 
+    // v3: cola de Automix
+    if (version < 3)
+    {
+        exec (R"sql(
+            CREATE TABLE IF NOT EXISTS automix_queue (
+                id       INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_automix ON automix_queue (position);
+        )sql");
+        version = 3;
+    }
+
     // (las próximas versiones añaden aquí su "if (version < N)")
 
     exec (("PRAGMA user_version = " + juce::String (juce::jmax (version, schemaVersion))).toRawUTF8());
@@ -317,6 +331,11 @@ std::vector<LibraryTrack> Library::query (const LibraryView& view, const juce::S
         case LibraryView::Type::history:
             sql = juce::String ("SELECT ") + trackColumns + ", h.id, h.played_at FROM history h JOIN tracks t ON t.id = h.track_id";
             defaultOrder = " ORDER BY h.played_at DESC";
+            break;
+
+        case LibraryView::Type::automix:
+            sql = juce::String ("SELECT ") + trackColumns + ", aq.id, 0 FROM automix_queue aq JOIN tracks t ON t.id = aq.track_id";
+            defaultOrder = " ORDER BY aq.position";
             break;
 
         case LibraryView::Type::playlist:
@@ -738,6 +757,88 @@ void Library::removeFromPlaylist (const juce::Array<juce::int64>& entryIds)
         exec ("COMMIT");
     }
     notify();
+}
+
+//==============================================================================
+// Cola de Automix
+//==============================================================================
+void Library::addToAutomix (const juce::Array<juce::int64>& trackIds)
+{
+    {
+        const juce::ScopedLock sl (lock);
+        exec ("BEGIN");
+
+        juce::int64 position = 0;
+        {
+            Statement maxPos (db, "SELECT COALESCE(MAX(position), 0) FROM automix_queue");
+            if (maxPos.next())
+                position = maxPos.integer (0);
+        }
+
+        Statement st (db, "INSERT INTO automix_queue (track_id, position) VALUES (?, ?)");
+        for (auto id : trackIds)
+        {
+            st.bind (1, id).bind (2, ++position).run();
+            st.reset();
+        }
+        exec ("COMMIT");
+    }
+    notify();
+}
+
+void Library::addPlaylistToAutomix (juce::int64 playlistId)
+{
+    juce::Array<juce::int64> ids;
+    {
+        const juce::ScopedLock sl (lock);
+        Statement st (db, "SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position");
+        st.bind (1, playlistId);
+        while (st.next())
+            ids.add (st.integer (0));
+    }
+    addToAutomix (ids);
+}
+
+void Library::removeFromAutomix (const juce::Array<juce::int64>& entryIds)
+{
+    {
+        const juce::ScopedLock sl (lock);
+        exec ("BEGIN");
+        Statement st (db, "DELETE FROM automix_queue WHERE id = ?");
+        for (auto id : entryIds)
+        {
+            st.bind (1, id).run();
+            st.reset();
+        }
+        exec ("COMMIT");
+    }
+    notify();
+}
+
+void Library::clearAutomix()
+{
+    exec ("DELETE FROM automix_queue");
+    notify();
+}
+
+std::optional<LibraryTrack> Library::automixNext()
+{
+    const juce::ScopedLock sl (lock);
+    Statement st (db, juce::String ("SELECT ") + trackColumns
+                      + ", aq.id FROM automix_queue aq JOIN tracks t ON t.id = aq.track_id ORDER BY aq.position LIMIT 1");
+    if (! st.next())
+        return std::nullopt;
+
+    auto t = st.track();
+    t.entryId = st.integer (20);
+    return t;
+}
+
+int Library::automixCount()
+{
+    const juce::ScopedLock sl (lock);
+    Statement st (db, "SELECT COUNT(*) FROM automix_queue");
+    return st.next() ? (int) st.integer (0) : 0;
 }
 
 void Library::clearHistory()

@@ -32,7 +32,7 @@ struct LibraryPlaylist
 // Qué se está viendo en el navegador
 struct LibraryView
 {
-    enum class Type { all, recentlyAdded, history, playlist, folder };
+    enum class Type { all, recentlyAdded, history, playlist, folder, automix };
     Type type = Type::all;
     juce::int64 playlistId = 0;
     juce::File folder;
@@ -88,6 +88,14 @@ public:
     void removeFromPlaylist (const juce::Array<juce::int64>& entryIds);
     void clearHistory();
 
+    //== Cola de Automix =========================================================
+    void addToAutomix (const juce::Array<juce::int64>& trackIds);
+    void addPlaylistToAutomix (juce::int64 playlistId);
+    void removeFromAutomix (const juce::Array<juce::int64>& entryIds);
+    void clearAutomix();
+    std::optional<LibraryTrack> automixNext();          // primera de la cola (entryId = su fila)
+    int automixCount();
+
     //== Trabajo en segundo plano ================================================
     void analysePending();                              // BPM de todas las canciones sin analizar
     void cancelAnalysis()                               { cancelAnalysisFlag = true; }
@@ -101,7 +109,7 @@ private:
 
     // Versión del esquema de la base de datos. Cada actualización de CesarDJ que cambie la base de datos
     // sube este número y añade su paso en migrate(): las bibliotecas antiguas se actualizan solas al abrirlas.
-    static constexpr int schemaVersion = 2;
+    static constexpr int schemaVersion = 3;
 
     void exec (const char* sql);
     void createSchema();
