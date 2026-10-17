@@ -128,7 +128,7 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     table.getViewport()->setScrollBarThickness (10);
     addAndMakeVisible (table);
 
-    emptyLabel.setText (juce::String::fromUTF8 ("Tu biblioteca está vacía.\nAnade la carpeta donde tienes tu música: se escanea en segundo plano ")
+    emptyLabel.setText (juce::String::fromUTF8 ("Tu biblioteca está vacía.\nAñade la carpeta donde tienes tu música: se escanea en segundo plano ")
                         + juce::String::fromUTF8 ("y después puedes analizar el BPM de todas las canciones."), juce::dontSendNotification);
     emptyLabel.setJustificationType (juce::Justification::centred);
     emptyLabel.setColour (juce::Label::textColourId, textDim);

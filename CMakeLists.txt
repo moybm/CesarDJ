@@ -61,6 +61,13 @@ juce_add_gui_app(CesarDJ
     ICON_BIG     Resources/vespa.svg
     ICON_SMALL   Resources/vespa.svg)
 
+# Si cambia el logo, regenerar el icono del .exe (JUCE no lo detecta por sí solo)
+set(CESARDJ_ICON "${CMAKE_BINARY_DIR}/CesarDJ_artefacts/JuceLibraryCode/icon.ico")
+if (EXISTS "${CESARDJ_ICON}" AND "${CMAKE_SOURCE_DIR}/Resources/vespa.svg" IS_NEWER_THAN "${CESARDJ_ICON}")
+    file(REMOVE "${CESARDJ_ICON}")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS Resources/vespa.svg)
+
 # Logo incrustado en el programa (bienvenida, barra superior, platos)
 juce_add_binary_data(CesarDJData SOURCES
     Resources/vespa.svg
