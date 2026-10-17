@@ -15,6 +15,7 @@ struct LibraryTrack
     juce::String title, artist, album, genre, year, comment, key;
     double duration = 0.0, bpm = 0.0, firstBeat = 0.0;
     bool analysed = false;
+    bool keyAnalysed = false;           // tonalidad calculada por CesarDJ (no solo la de la etiqueta)
     int rating = 0, playCount = 0;
     juce::int64 lastPlayed = 0, dateAdded = 0, playedAt = 0;
     double cuePoint = 0.0;
@@ -70,7 +71,8 @@ public:
     void addFileAsync (const juce::File& file);         // canción suelta (p. ej. arrastrada desde el Explorador)
 
     //== Datos de canciones =======================================================
-    void setAnalysis (const juce::File& file, double bpm, double firstBeat, double duration);
+    // Guarda BPM, beatgrid y tonalidad (Camelot, "" si no se pudo calcular)
+    void setAnalysis (const juce::File& file, double bpm, double firstBeat, double duration, const juce::String& key);
     void setCues (const juce::File& file, double cuePoint, const std::array<double, 4>& hotCues);
     void setRating (juce::int64 trackId, int rating);
     void markPlayed (const juce::File& file, int deck);
@@ -97,8 +99,13 @@ private:
     class Worker;
     struct Statement;
 
+    // Versión del esquema de la base de datos. Cada actualización de CesarDJ que cambie la base de datos
+    // sube este número y añade su paso en migrate(): las bibliotecas antiguas se actualizan solas al abrirlas.
+    static constexpr int schemaVersion = 2;
+
     void exec (const char* sql);
     void createSchema();
+    void migrate();
     void scanFolder (const juce::File& folder);
     void analyseLoop();
     void insertOrUpdate (const juce::File& file, const TagInfo& tags, double duration);

@@ -11,6 +11,7 @@
 #include "SamplerEngine.h"
 #include "Recorder.h"
 #include "MidiController.h"
+#include "Branding.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -27,6 +28,7 @@ public:
 
     void paint (juce::Graphics& g) override;
     void paintOverChildren (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
 
@@ -81,7 +83,8 @@ private:
     ClickListener learnListener;
     juce::String statusMessage;
     juce::uint32 statusMessageUntil = 0;
-    juce::Rectangle<int> midiLedArea;
+    juce::Rectangle<int> midiLedArea, logoArea;
+    std::unique_ptr<juce::Drawable> logoMark = Branding::createMark (juce::Colours::white);
     juce::TooltipWindow tooltips { this, 700 };
     juce::Rectangle<int> statusArea, masterLabelArea;
 

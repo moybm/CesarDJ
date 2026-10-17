@@ -1,5 +1,6 @@
 #include "DeckComponent.h"
 #include "DJLookAndFeel.h"
+#include "Camelot.h"
 
 using namespace DJColours;
 
@@ -430,6 +431,12 @@ void DeckComponent::paintHeader (juce::Graphics& g)
 
     // BPM
     auto bpmBox = mirrored ? area.removeFromLeft (92) : area.removeFromRight (92);
+    bpmBoxArea = bpmBox;
+    if (juce::Time::getMillisecondCounter() < tapFlashUntil)
+    {
+        g.setColour (colour.withAlpha (0.25f));
+        g.fillRect (bpmBox);
+    }
     g.setColour (border);
     g.fillRect (bpmBox.getX(), bpmBox.getY() + 6, 1, bpmBox.getHeight() - 12);
     g.fillRect (bpmBox.getRight() - 1, bpmBox.getY() + 6, 1, bpmBox.getHeight() - 12);
@@ -444,6 +451,15 @@ void DeckComponent::paintHeader (juce::Graphics& g)
     g.setColour (DJColours::text);
     g.setFont (juce::FontOptions (21.0f, juce::Font::bold));
     g.drawText (bpmText, bpmBox.reduced (8, 0).withTrimmedTop (12), juce::Justification::centredRight);
+
+    // Tonalidad (Camelot): verde si combina con la del otro deck
+    const int key = deck.getCamelot();
+    if (key >= 0)
+    {
+        g.setColour (Camelot::compatible (key, other.getCamelot()) ? play : DJColours::text.withAlpha (0.7f));
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.drawText (Camelot::toString (key), bpmBox.reduced (8, 5), juce::Justification::topRight);
+    }
 
     // Título y artista
     auto titleArea = area.reduced (10, 5);
@@ -593,9 +609,62 @@ bool DeckComponent::isInterestedInFileDrag (const juce::StringArray& files)
 
 void DeckComponent::mouseDown (const juce::MouseEvent& e)
 {
+    if (bpmBoxArea.contains (e.getPosition()) && deck.getTrack() != nullptr)
+    {
+        if (e.mods.isPopupMenu())
+            showBeatgridMenu();
+        else
+            tapTempo();
+        return;
+    }
+
     for (int slot = 1; slot < 3; ++slot)
         if (fxLabels[(size_t) slot].contains (e.getPosition()))
             showFxMenu (slot);
+}
+
+// Tap tempo: cada clic marca un beat; con 4 o más se calcula el BPM (media de los últimos 8)
+void DeckComponent::tapTempo()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (! tapTimes.empty() && now - tapTimes.back() > 2000.0)
+        tapTimes.clear();
+
+    tapTimes.push_back (now);
+    if (tapTimes.size() > 8)
+        tapTimes.erase (tapTimes.begin());
+
+    tapFlashUntil = juce::Time::getMillisecondCounter() + 120;
+
+    if (tapTimes.size() >= 4)
+    {
+        const double avg = (tapTimes.back() - tapTimes.front()) / (double) (tapTimes.size() - 1);
+        deck.applyTapTempo (std::round (60000.0 / avg * 10.0) / 10.0);
+    }
+    repaint (headerArea);
+}
+
+void DeckComponent::showBeatgridMenu()
+{
+    const auto* t = deck.getTrack();
+    const bool grid = t != nullptr && t->hasBeatgrid();
+    const double bpm = grid ? t->bpm : 0.0;
+    const double first = grid ? t->firstBeat : 0.0;
+
+    juce::PopupMenu m;
+    m.addSectionHeader (grid ? "Beatgrid: " + juce::String (bpm, 2) + " BPM" : juce::String ("Beatgrid"));
+    m.addItem (juce::String::fromUTF8 ("Tap tempo: haz clic en el BPM al ritmo (4 o más veces)"), false, false, nullptr);
+    m.addSeparator();
+    m.addItem (juce::String::fromUTF8 ("BPM × 2"), grid, false, [this, bpm, first] { deck.setBeatgrid (bpm * 2.0, first); });
+    m.addItem (juce::String::fromUTF8 ("BPM ÷ 2"), grid, false, [this, bpm, first] { deck.setBeatgrid (bpm / 2.0, first); });
+    m.addItem (juce::String::fromUTF8 ("El primer beat está aquí (posición actual)"), grid, false,
+               [this, bpm] { deck.setBeatgrid (bpm, deck.getPosition()); });
+    m.addItem (juce::String::fromUTF8 ("Mover rejilla 10 ms a la izquierda"), grid, false, [this, bpm, first] { deck.setBeatgrid (bpm, first - 0.01); });
+    m.addItem (juce::String::fromUTF8 ("Mover rejilla 10 ms a la derecha"), grid, false, [this, bpm, first] { deck.setBeatgrid (bpm, first + 0.01); });
+    m.addSeparator();
+    m.addItem ("Volver a analizar BPM", [this] { deck.reanalyseBeatgrid(); });
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (bpmBoxArea)));
 }
 
 void DeckComponent::showFxMenu (int slot)

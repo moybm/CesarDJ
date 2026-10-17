@@ -1,8 +1,9 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "MainComponent.h"
 #include "DJLookAndFeel.h"
+#include "Branding.h"
 
-class MiDJApplication : public juce::JUCEApplication
+class CesarDJApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override    { return JUCE_APPLICATION_NAME_STRING; }
@@ -12,7 +13,13 @@ public:
     void initialise (const juce::String& commandLine) override
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+
+        // Pantalla de bienvenida con la Vespa mientras se prepara todo (se borra sola)
+        auto* splash = new juce::SplashScreen (Branding::appName, Branding::createSplashImage(), true);
+
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
+        splash->toFront (false);
+        splash->deleteAfterDelay (juce::RelativeTime::seconds (2.2), true);
         mainWindow->loadFiles (commandLine);
     }
 
@@ -80,4 +87,4 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION (MiDJApplication)
+START_JUCE_APPLICATION (CesarDJApplication)

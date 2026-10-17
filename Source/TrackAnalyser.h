@@ -12,4 +12,7 @@ namespace TrackAnalyser
 
     // Detecta BPM y fase del beatgrid (tempo constante). Rellena track.bpm y track.firstBeat.
     void detectBeatgrid (Track& track, const std::function<bool()>& shouldStop);
+
+    // Detecta la tonalidad (cromagrama + perfiles de Krumhansl). Devuelve el código Camelot o -1.
+    int detectKey (const Track& track, const std::function<bool()>& shouldStop);
 }

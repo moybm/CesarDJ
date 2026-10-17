@@ -22,6 +22,7 @@ public:
         double bpm = 0.0, firstBeat = 0.0;
         double cuePoint = 0.0;
         std::array<double, numHotCues> hotCues { -1.0, -1.0, -1.0, -1.0 };
+        int camelot = -1;                   // tonalidad ya conocida (-1 = calcularla)
     };
 
     explicit DeckEngine (juce::AudioFormatManager& formats);
@@ -62,6 +63,13 @@ public:
     bool pitchForBpm (double targetBpm, double& pitchOut) const;
     // Alinea la fase de los beats con otro deck (salto de menos de medio beat)
     void alignPhaseWith (const DeckEngine& other);
+
+    int getCamelot() const                          { return track != nullptr ? track->camelot.load() : -1; }
+
+    //== Edición del beatgrid (se guarda en la biblioteca vía onAnalysed) =============
+    void setBeatgrid (double bpm, double firstBeat);
+    void applyTapTempo (double bpm);                // mantiene en su sitio el beat más cercano
+    void reanalyseBeatgrid();
 
     //== Hot cues ===================================================================
     void triggerHotCue (int index);

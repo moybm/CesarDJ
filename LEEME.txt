@@ -1,0 +1,53 @@
+CesarDJ - Software DJ
+=====================
+
+INSTALAR
+  - Instalador: ejecuta CesarDJ-Setup-X.Y.Z.exe y sigue el asistente.
+    No necesita permisos de administrador. Crea accesos en el menu Inicio
+    (y en el escritorio si lo marcas).
+  - Portable: descomprime CesarDJ-X.Y.Z-portable.zip en cualquier carpeta
+    (o en un USB) y abre CesarDJ.exe. No hay que instalar nada.
+  - Requisitos: Windows 10 u 11 de 64 bits.
+  - Si Windows muestra "Windows protegio su PC": pulsa "Mas informacion"
+    y despues "Ejecutar de todas formas" (el programa no esta firmado).
+
+ACTUALIZAR
+  Instala la version nueva encima de la anterior (o sustituye el .exe en la
+  version portable). La biblioteca, las listas, el historial, los cues,
+  el sampler y las asignaciones MIDI se conservan: la base de datos se
+  actualiza sola al abrir la version nueva.
+
+TUS DATOS
+  %APPDATA%\CesarDJ   (biblioteca library.db y ajustes CesarDJ.settings)
+  Para llevarlos a otro PC, copia esa carpeta al mismo sitio del otro PC.
+  Las grabaciones se guardan en  Musica\CesarDJ Grabaciones.
+  Desinstalar NO borra estos datos.
+
+PRIMEROS PASOS
+  1. AUDIO (arriba a la derecha): elige tu tarjeta de sonido.
+     Con 4 salidas, la 3-4 son los auriculares (boton de cascos del mezclador).
+  2. "+ Carpeta" (abajo a la izquierda): anade tu carpeta de musica.
+  3. "Analizar BPM": calcula BPM, beatgrid y tonalidad de todas las canciones.
+  4. Arrastra canciones a los decks, o doble clic para cargar en el deck libre.
+
+ATAJOS DE TECLADO
+  Deck A:  Q = CUE   W = PLAY/PAUSA   1 2 3 4 = hot cues
+  Deck B:  O = CUE   P = PLAY/PAUSA   7 8 9 0 = hot cues
+  Ctrl+F = buscar    Ctrl+M = MIDI learn    Esc = salir del MIDI learn
+
+TRUCOS
+  - Clic en el BPM del deck: tap tempo (4 o mas clics al ritmo).
+    Clic derecho en el BPM: BPM x2 / /2, mover la rejilla, volver a analizar.
+  - Tonalidad en notacion Camelot (8A, 11B...). En verde = combina con el
+    otro deck. Boton ARMONICO del navegador: solo canciones compatibles.
+  - Clic en el nombre de un efecto (FLANGER, CORTAR...) para cambiarlo por
+    Eco, Reverb o Bitcrush.
+  - Pads en modo SAMPLER: clic derecho para cargar tu propio sonido.
+  - Plato: centro = scratch, aro exterior = empujar/frenar, rueda del raton
+    = ajuste fino.
+  - REC graba la sesion en WAV de 24 bits.
+  - MIDI: conecta tu controladora, pulsa Ctrl+M, haz clic en un control de
+    la pantalla y muevelo en la controladora.
+  - Clic en el logo de arriba a la izquierda: version y carpeta de datos.
+
+Hecho con JUCE, SoundTouch (LGPL) y SQLite.

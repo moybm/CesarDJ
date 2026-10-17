@@ -1,6 +1,7 @@
 #include "BrowserComponent.h"
 #include "DJLookAndFeel.h"
 #include "TagReader.h"
+#include "Camelot.h"
 
 using namespace DJColours;
 
@@ -84,6 +85,12 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     bpmFilterButton.onClick = [this] { refreshRows(); };
     addAndMakeVisible (bpmFilterButton);
 
+    keyFilterButton.setClickingTogglesState (true);
+    keyFilterButton.setColour (juce::TextButton::buttonOnColourId, play.darker (0.4f));
+    keyFilterButton.setTooltip (juce::String::fromUTF8 ("Muestra solo canciones de tonalidad compatible (rueda Camelot) con el deck que está sonando"));
+    keyFilterButton.onClick = [this] { refreshRows(); };
+    addAndMakeVisible (keyFilterButton);
+
     analyseButton.onClick = [this]
     {
         if (library.isBusy())
@@ -142,7 +149,7 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     addAndMakeVisible (loadB);
 
     for (auto* c : { (juce::Component*) &addFolderButton, (juce::Component*) &addListButton, (juce::Component*) &bpmFilterButton,
-                     (juce::Component*) &analyseButton, (juce::Component*) &loadA, (juce::Component*) &loadB,
+                     (juce::Component*) &analyseButton, (juce::Component*) &keyFilterButton, (juce::Component*) &loadA, (juce::Component*) &loadB,
                      (juce::Component*) &emptyAddButton })
         c->setWantsKeyboardFocus (false);
 
@@ -191,6 +198,15 @@ void BrowserComponent::refreshRows()
     }
 
     rows = library.query (view, searchBox.getText(), sortColumn, sortAscending, bpmMin, bpmMax);
+
+    // Filtro armónico (en memoria: la tonalidad puede venir en notación Camelot o musical)
+    if (keyFilterButton.getToggleState() && referenceKey != nullptr && referenceKey() >= 0)
+    {
+        const int ref = referenceKey();
+        rows.erase (std::remove_if (rows.begin(), rows.end(),
+                                    [ref] (const LibraryTrack& t) { return ! Camelot::compatible (Camelot::parse (t.key), ref); }),
+                    rows.end());
+    }
     table.updateContent();
 
     juce::SparseSet<int> newSelection;
@@ -303,7 +319,17 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int column, int w,
                 s = t.analysed ? juce::String (t.bpm, 1) : "~" + juce::String (juce::roundToInt (t.bpm));
             just = juce::Justification::centredRight;
             break;
-        case colKey:      s = t.key; break;
+        case colKey:
+        {
+            const int code = Camelot::parse (t.key);
+            s = code >= 0 ? Camelot::toString (code) : t.key;
+            if (code >= 0 && referenceKey != nullptr && Camelot::compatible (code, referenceKey()))
+            {
+                g.setColour (play.withAlpha (selected ? 0.5f : 0.22f));
+                g.fillRoundedRectangle (4.0f, 4.0f, (float) w - 8.0f, (float) h - 8.0f, 3.0f);
+            }
+            break;
+        }
         case colDuration: s = formatDuration (t.duration); just = juce::Justification::centredRight; break;
         case colGenre:    s = t.genre; break;
         case colAlbum:    s = t.album; break;
@@ -601,7 +627,8 @@ void BrowserComponent::paint (juce::Graphics& g)
     };
 
     line ("BPM:", t->bpm > 0.0 ? juce::String (t->bpm, 1) + (t->analysed ? "" : " (etiqueta)") : juce::String ("sin analizar"));
-    line ("Tono:", t->key);
+    const int code = Camelot::parse (t->key);
+    line ("Tono:", code >= 0 ? Camelot::toString (code) + (t->keyAnalysed ? juce::String() : juce::String (" (etiqueta)")) : t->key);
     line (juce::String::fromUTF8 ("Duración:"), formatDuration (t->duration));
     line (juce::String::fromUTF8 ("Álbum:"), t->album);
     line (juce::String::fromUTF8 ("Género:"), t->genre);
@@ -639,6 +666,8 @@ void BrowserComponent::resized()
     analyseButton.setBounds (bar.removeFromRight (150));
     bar.removeFromRight (6);
     bpmFilterButton.setBounds (bar.removeFromRight (86));
+    bar.removeFromRight (6);
+    keyFilterButton.setBounds (bar.removeFromRight (90));
     bar.removeFromRight (10);
     statusArea = bar.removeFromRight (juce::jmin (230, bar.getWidth() / 4));
     bar.removeFromRight (10);

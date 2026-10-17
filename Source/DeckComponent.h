@@ -68,6 +68,8 @@ private:
     void updatePads();
     void showSampleMenu (int pad);
     void showFxMenu (int slot);
+    void tapTempo();
+    void showBeatgridMenu();
     int samplerSlot (int pad) const             { return index * 4 + pad; }
     void setPitchValue (double percent);
     void cyclePitchRange();
@@ -103,6 +105,10 @@ private:
     std::array<juce::Rectangle<int>, 3> fxLabels;
 
     bool dragHighlight = false;
+
+    juce::Rectangle<int> bpmBoxArea;                // clic = tap tempo, clic derecho = menú del beatgrid
+    std::vector<double> tapTimes;
+    juce::uint32 tapFlashUntil = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeckComponent)
 };

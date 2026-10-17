@@ -59,11 +59,21 @@ void DeckEngine::loadFile (const juce::File& file, const TrackInfo& knownInfo)
             trackLoaded (newTrack, knownInfo);
         });
 
-        if (newTrack == nullptr || newTrack->analysed.load())
+        if (newTrack == nullptr)
             return;
 
-        // La canción ya se puede reproducir; ahora el análisis de BPM
-        TrackAnalyser::detectBeatgrid (*newTrack, cancelled);
+        // La canción ya se puede reproducir; ahora lo que falte: BPM/beatgrid y tonalidad
+        const bool needGrid = ! newTrack->analysed.load();
+        const bool needKey = knownInfo.camelot < 0;
+        if (! needKey)
+            newTrack->camelot = knownInfo.camelot;
+        if (! needGrid && ! needKey)
+            return;
+
+        if (needGrid)
+            TrackAnalyser::detectBeatgrid (*newTrack, cancelled);
+        if (! cancelled() && needKey)
+            newTrack->camelot = TrackAnalyser::detectKey (*newTrack, cancelled);
         if (cancelled())
             return;
 
@@ -225,6 +235,54 @@ void DeckEngine::alignPhaseWith (const DeckEngine& other)
     if (diff < -0.5) diff += 1.0;
 
     seek (myPos + diff * track->beatLength());
+}
+
+void DeckEngine::setBeatgrid (double bpm, double firstBeat)
+{
+    if (track == nullptr || bpm < 30.0 || bpm > 300.0)
+        return;
+
+    const double len = 60.0 / bpm;
+    track->bpm = bpm;
+    track->firstBeat = firstBeat - std::floor (firstBeat / len) * len;
+    track->analysed = true;
+
+    if (onAnalysed != nullptr)
+        onAnalysed (*track);
+}
+
+void DeckEngine::applyTapTempo (double bpm)
+{
+    if (track == nullptr)
+        return;
+
+    // El beat más cercano a la posición actual se queda donde está; el resto se reparte con el BPM nuevo
+    const double anchor = track->hasBeatgrid() ? track->nearestBeat (getPosition()) : getPosition();
+    setBeatgrid (bpm, anchor);
+}
+
+void DeckEngine::reanalyseBeatgrid()
+{
+    if (track == nullptr)
+        return;
+
+    auto t = track;
+    const int generation = loadGeneration.load();
+    std::weak_ptr<bool> alive = aliveToken;
+
+    loaderPool.addJob ([this, t, generation, alive]
+    {
+        auto cancelled = [this, generation] { return generation != loadGeneration.load(); };
+        TrackAnalyser::detectBeatgrid (*t, cancelled);
+        if (cancelled())
+            return;
+
+        juce::MessageManager::callAsync ([this, t, generation, alive]
+        {
+            if (! alive.expired() && generation == loadGeneration.load() && onAnalysed != nullptr)
+                onAnalysed (*t);
+        });
+    });
 }
 
 double DeckEngine::beatLengthOrDefault() const

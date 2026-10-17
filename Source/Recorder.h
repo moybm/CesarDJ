@@ -10,7 +10,7 @@ public:
     Recorder();
     ~Recorder();
 
-    // Carpeta por defecto: Música/MiDJ Grabaciones
+    // Carpeta por defecto: Música/CesarDJ Grabaciones
     static juce::File defaultFolder();
 
     bool start (const juce::File& file, double sampleRate);   // hilo de mensajes

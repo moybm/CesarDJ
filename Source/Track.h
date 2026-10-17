@@ -23,6 +23,7 @@ struct Track
     double bpm = 0.0;                   // BPM original de la canción
     double firstBeat = 0.0;             // segundos del primer beat de la rejilla
     std::atomic<bool> analysed { false };
+    std::atomic<int> camelot { -1 };    // tonalidad (ver Camelot.h), -1 = desconocida
 
     int numSamples() const              { return audio.getNumSamples(); }
     double getLength() const            { return audio.getNumSamples() / sampleRate; }

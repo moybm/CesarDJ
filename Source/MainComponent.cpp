@@ -1,14 +1,18 @@
 #include "MainComponent.h"
 #include "DJLookAndFeel.h"
+#include "Branding.h"
+#include "Camelot.h"
 
 using namespace DJColours;
 
 juce::PropertiesFile::Options MainComponent::settingsOptions()
 {
+    Branding::migrateOldData();     // la primera vez, traer los datos de "MiDJ"
+
     juce::PropertiesFile::Options o;
-    o.applicationName = "MiDJ";
+    o.applicationName = Branding::appName;
     o.filenameSuffix = ".settings";
-    o.folderName = "MiDJ";
+    o.folderName = Branding::appName;
     o.osxLibrarySubFolder = "Application Support";
     return o;
 }
@@ -33,6 +37,13 @@ MainComponent::MainComponent()
         if (deckA.isPlaying() && deckA.getEffectiveBpm() > 0.0) return deckA.getEffectiveBpm();
         if (deckB.isPlaying() && deckB.getEffectiveBpm() > 0.0) return deckB.getEffectiveBpm();
         return deckA.getEffectiveBpm() > 0.0 ? deckA.getEffectiveBpm() : deckB.getEffectiveBpm();
+    };
+
+    browser.referenceKey = [this]
+    {
+        if (deckA.isPlaying() && deckA.getCamelot() >= 0) return deckA.getCamelot();
+        if (deckB.isPlaying() && deckB.getCamelot() >= 0) return deckB.getCamelot();
+        return deckA.getCamelot() >= 0 ? deckA.getCamelot() : deckB.getCamelot();
     };
 
     connectDeck (0, deckA, deckViewA);
@@ -63,7 +74,7 @@ MainComponent::MainComponent()
     recButton.setWantsKeyboardFocus (false);
     recButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffc62828));
     recButton.onClick = [this] { toggleRecording(); };
-    recButton.setTooltip (juce::String::fromUTF8 ("Graba la sesión (salida master) en WAV de 24 bits, en Música\\MiDJ Grabaciones"));
+    recButton.setTooltip (juce::String::fromUTF8 ("Graba la sesión (salida master) en WAV de 24 bits, en Música\\CesarDJ Grabaciones"));
     addAndMakeVisible (recButton);
 
     deckViewA.onLoadSample = deckViewB.onLoadSample = [this] (int slot, const juce::File& f) { loadSample (slot, f); };
@@ -128,7 +139,7 @@ void MainComponent::connectDeck (int index, DeckEngine& deck, DeckComponent& vie
 
     deck.onAnalysed = [this] (const Track& t)
     {
-        library.setAnalysis (t.file, t.bpm, t.firstBeat, t.getLength());
+        library.setAnalysis (t.file, t.bpm, t.firstBeat, t.getLength(), Camelot::toString (t.camelot.load()));
     };
 
     deck.onCuesChanged = [this, &deck]
@@ -163,6 +174,7 @@ DeckEngine::TrackInfo MainComponent::infoFor (const juce::File& file)
         info.firstBeat = t->firstBeat;
         info.cuePoint = t->cuePoint;
         info.hotCues = t->hotCues;
+        info.camelot = Camelot::parse (t->key);     // la de la etiqueta vale si es legible
     }
 
     return info;
@@ -275,6 +287,12 @@ void MainComponent::timerCallback()
         repaint (getLocalBounds().removeFromTop (40));
 }
 
+void MainComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (logoArea.contains (e.getPosition()))
+        Branding::showAbout();
+}
+
 void MainComponent::showStatus (const juce::String& message)
 {
     statusMessage = message;
@@ -297,7 +315,7 @@ void MainComponent::toggleRecording()
     }
 
     auto* device = deviceManager.getCurrentAudioDevice();
-    const auto name = "MiDJ " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S") + ".wav";
+    const auto name = Branding::appName + " " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S") + ".wav";
     const auto file = Recorder::defaultFolder().getChildFile (name);
 
     if (device == nullptr || ! recorder.start (file, device->getCurrentSampleRate()))
@@ -487,13 +505,17 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (juce::Colours::black);
     g.fillRect (top.removeFromBottom (1));
 
-    // Logo
-    auto logo = top.reduced (12, 7).removeFromLeft (92);
-    g.setColour (DJColours::deckB);
-    g.fillRoundedRectangle (logo.toFloat(), 3.0f);
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (19.0f, juce::Font::bold));
-    g.drawText ("MiDJ", logo, juce::Justification::centred);
+    // Logo: Vespa + nombre (clic = Acerca de)
+    {
+        auto logo = logoArea;
+        if (logoMark != nullptr)
+            logoMark->drawWithin (g, logo.removeFromLeft (38).toFloat().reduced (0.0f, 4.0f),
+                                  juce::RectanglePlacement::centred, 1.0f);
+        logo.removeFromLeft (8);
+        g.setColour (juce::Colours::white);
+        g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        g.drawText (Branding::appName, logo, juce::Justification::centredLeft);
+    }
 
     // Estado: CPU y hora
     g.setColour (textDim);
@@ -538,7 +560,8 @@ void MainComponent::resized()
     top.removeFromRight (14);
     masterVolume.setBounds (top.removeFromRight (180));
     masterLabelArea = top.removeFromRight (60);
-    statusArea = top.withTrimmedLeft (110);
+    logoArea = top.removeFromLeft (150);
+    statusArea = top.withTrimmedLeft (20);
 
     waveforms.setBounds (area.removeFromTop (juce::jlimit (110, 190, area.getHeight() / 6)));
     area.removeFromTop (2);

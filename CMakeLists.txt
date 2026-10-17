@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MiDJ VERSION 0.5.0)
+project(CesarDJ VERSION 0.6.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Runtime de Visual C++ dentro del .exe: MiDJ.exe funciona en otro PC sin instalar nada
+# Runtime de Visual C++ dentro del .exe: CesarDJ.exe funciona en otro PC sin instalar nada
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Las dependencias se descargan automáticamente la primera vez que se configura el proyecto
@@ -54,11 +54,19 @@ if (MSVC)
     target_compile_options(soundtouch PRIVATE /W0)
 endif()
 
-juce_add_gui_app(MiDJ
-    PRODUCT_NAME "MiDJ"
-    COMPANY_NAME "moybm")
+juce_add_gui_app(CesarDJ
+    PRODUCT_NAME "CesarDJ"
+    COMPANY_NAME "CesarDJ"
+    DESCRIPTION  "CesarDJ - software DJ"
+    ICON_BIG     Resources/vespa.svg
+    ICON_SMALL   Resources/vespa.svg)
 
-target_sources(MiDJ PRIVATE
+# Logo incrustado en el programa (bienvenida, barra superior, platos)
+juce_add_binary_data(CesarDJData SOURCES
+    Resources/vespa.svg
+    Resources/vespa_mark.svg)
+
+target_sources(CesarDJ PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/DJLookAndFeel.cpp
@@ -77,21 +85,23 @@ target_sources(MiDJ PRIVATE
     Source/Library.cpp
     Source/SamplerEngine.cpp
     Source/Recorder.cpp
-    Source/MidiController.cpp)
+    Source/MidiController.cpp
+    Source/Branding.cpp)
 
-target_compile_definitions(MiDJ PRIVATE
+target_compile_definitions(CesarDJ PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_USE_MP3AUDIOFORMAT=1
-    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:MiDJ,JUCE_PRODUCT_NAME>"
-    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:MiDJ,JUCE_VERSION>")
+    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CesarDJ,JUCE_PRODUCT_NAME>"
+    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CesarDJ,JUCE_VERSION>")
 
 if (MSVC)
-    target_compile_options(MiDJ PRIVATE /utf-8)   # los textos con acentos del código son UTF-8
+    target_compile_options(CesarDJ PRIVATE /utf-8)   # los textos con acentos del código son UTF-8
 endif()
 
-target_link_libraries(MiDJ
+target_link_libraries(CesarDJ
     PRIVATE
+        CesarDJData
         soundtouch
         sqlite3
         juce::juce_audio_utils

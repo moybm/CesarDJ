@@ -14,7 +14,7 @@ Recorder::~Recorder()
 juce::File Recorder::defaultFolder()
 {
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory)
-               .getChildFile (juce::String::fromUTF8 ("MiDJ Grabaciones"));
+               .getChildFile ("CesarDJ Grabaciones");
 }
 
 bool Recorder::start (const juce::File& newFile, double rate)

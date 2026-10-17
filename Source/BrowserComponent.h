@@ -22,6 +22,7 @@ public:
     std::function<void (const juce::File&, int deckIndex)> onLoadRequest;  // deckIndex -1 = primer deck libre
     std::function<juce::File (int deckIndex)> loadedFile;                  // para marcar lo cargado en A/B
     std::function<double()> referenceBpm;                                  // BPM del deck que suena (filtro)
+    std::function<int()> referenceKey;                                     // tonalidad del deck que suena
 
     void markPlayedThisSession (const juce::File& file);
     void focusSearch()                          { searchBox.grabKeyboardFocus(); }
@@ -65,7 +66,7 @@ private:
     juce::TextButton addFolderButton { "+ Carpeta" }, addListButton { "+ Lista" };
 
     juce::TextEditor searchBox;
-    juce::TextButton bpmFilterButton { juce::String::fromUTF8 ("BPM ±6%") }, analyseButton;
+    juce::TextButton bpmFilterButton { juce::String::fromUTF8 ("BPM ±6%") }, keyFilterButton { juce::String::fromUTF8 ("ARMÓNICO") }, analyseButton;
     juce::TableListBox table { "canciones", this };
     juce::TextButton emptyAddButton { juce::String::fromUTF8 ("Añadir carpeta de música...") };
     juce::Label emptyLabel;

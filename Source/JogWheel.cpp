@@ -1,5 +1,6 @@
 #include "JogWheel.h"
 #include "DJLookAndFeel.h"
+#include "Branding.h"
 
 namespace
 {
@@ -72,9 +73,9 @@ void JogWheel::renderPlatter()
     g.setGradientFill (juce::ColourGradient (colour.brighter (0.2f), c.x, c.y - labelR,
                                              colour.darker (0.6f), c.x, c.y + labelR, false));
     g.fillEllipse (c.x - labelR, c.y - labelR, labelR * 2, labelR * 2);
-    g.setColour (juce::Colours::black.withAlpha (0.8f));
-    g.setFont (juce::FontOptions (labelR * 0.5f, juce::Font::bold));
-    g.drawText ("MiDJ", juce::Rectangle<float> (labelR * 2, labelR).withCentre (c), juce::Justification::centred);
+    if (auto mark = Branding::createMark (juce::Colours::black.withAlpha (0.85f)))
+        mark->drawWithin (g, juce::Rectangle<float> (labelR * 1.3f, labelR * 1.3f).withCentre (c),
+                          juce::RectanglePlacement::centred, 1.0f);
 }
 
 void JogWheel::paint (juce::Graphics& g)

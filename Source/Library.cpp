@@ -1,5 +1,6 @@
 #include "Library.h"
 #include "TrackAnalyser.h"
+#include "Camelot.h"
 #include <sqlite3.h>
 #include <deque>
 
@@ -33,7 +34,7 @@ namespace
     const char* const trackColumns =
         "t.id, t.path, t.title, t.artist, t.album, t.genre, t.year, t.comment, t.musical_key, "
         "t.duration, t.bpm, t.first_beat, t.analysed, t.rating, t.play_count, t.last_played, "
-        "t.date_added, t.cue_point, t.hot_cues";
+        "t.date_added, t.cue_point, t.hot_cues, t.key_analysed";
 
     // Columnas por las que se puede ordenar (lista blanca: nunca se mete texto libre en el SQL)
     juce::String orderClause (const juce::String& column, bool ascending)
@@ -41,7 +42,7 @@ namespace
         static const std::map<juce::String, juce::String> columns = {
             { "title", "t.title COLLATE NOCASE" }, { "artist", "t.artist COLLATE NOCASE" },
             { "album", "t.album COLLATE NOCASE" }, { "genre", "t.genre COLLATE NOCASE" },
-            { "year", "t.year" }, { "key", "t.musical_key" }, { "bpm", "t.bpm" },
+            { "year", "t.year" }, { "key", "CAST(t.musical_key AS INTEGER)" }, { "bpm", "t.bpm" },
             { "duration", "t.duration" }, { "rating", "t.rating" }, { "plays", "t.play_count" },
             { "added", "t.date_added" }, { "lastPlayed", "t.last_played" },
         };
@@ -109,6 +110,7 @@ struct Library::Statement
         t.dateAdded = integer (16);
         t.cuePoint = real (17);
         t.hotCues = hotCuesFromText (text (18));
+        t.keyAnalysed = integer (19) == 1;
         return t;
     }
 
@@ -197,6 +199,7 @@ Library::Library (const juce::File& databaseFile, const juce::String& audioWildc
     exec ("PRAGMA journal_mode=WAL");
     exec ("PRAGMA foreign_keys=ON");
     createSchema();
+    migrate();
 
     worker = std::make_unique<Worker> (*this);
 
@@ -266,6 +269,32 @@ void Library::createSchema()
         CREATE INDEX IF NOT EXISTS idx_playlist ON playlist_tracks (playlist_id, position);
         CREATE INDEX IF NOT EXISTS idx_history ON history (played_at);
     )sql");
+}
+
+void Library::migrate()
+{
+    int version = 0;
+    {
+        const juce::ScopedLock sl (lock);
+        Statement st (db, "PRAGMA user_version");
+        if (st.next())
+            version = (int) st.integer (0);
+    }
+
+    // v1: esquema original (fases 1-5)
+    if (version < 1)
+        version = 1;
+
+    // v2: tonalidad calculada por CesarDJ
+    if (version < 2)
+    {
+        exec ("ALTER TABLE tracks ADD COLUMN key_analysed INTEGER DEFAULT 0");
+        version = 2;
+    }
+
+    // (las próximas versiones añaden aquí su "if (version < N)")
+
+    exec (("PRAGMA user_version = " + juce::String (juce::jmax (version, schemaVersion))).toRawUTF8());
 }
 
 //==============================================================================
@@ -348,8 +377,8 @@ std::vector<LibraryTrack> Library::query (const LibraryView& view, const juce::S
     while (st.next())
     {
         auto t = st.track();
-        t.entryId = st.integer (19);
-        t.playedAt = st.integer (20);
+        t.entryId = st.integer (20);
+        t.playedAt = st.integer (21);
         result.push_back (std::move (t));
     }
 
@@ -379,7 +408,7 @@ int Library::countTracks()
 int Library::countPending()
 {
     const juce::ScopedLock sl (lock);
-    Statement st (db, "SELECT COUNT(*) FROM tracks WHERE analysed = 0");
+    Statement st (db, "SELECT COUNT(*) FROM tracks WHERE analysed = 0 OR (analysed = 1 AND key_analysed = 0)");
     return st.next() ? (int) st.integer (0) : 0;
 }
 
@@ -525,7 +554,7 @@ void Library::scanFolder (const juce::File& folder)
 //==============================================================================
 // Datos de canciones
 //==============================================================================
-void Library::setAnalysis (const juce::File& file, double bpm, double firstBeat, double duration)
+void Library::setAnalysis (const juce::File& file, double bpm, double firstBeat, double duration, const juce::String& key)
 {
     if (db == nullptr)
         return;
@@ -535,10 +564,12 @@ void Library::setAnalysis (const juce::File& file, double bpm, double firstBeat,
 
     {
         const juce::ScopedLock sl (lock);
-        Statement st (db, "UPDATE tracks SET bpm = ?, first_beat = ?, analysed = ?, "
+        Statement st (db, "UPDATE tracks SET bpm = ?, first_beat = ?, analysed = ?, key_analysed = 1, "
+                          "musical_key = CASE WHEN ? <> '' THEN ? ELSE musical_key END, "
                           "duration = CASE WHEN ? > 0 THEN ? ELSE duration END WHERE path = ?");
         st.bind (1, bpm).bind (2, firstBeat).bind (3, bpm > 0.0 ? 1 : 2)
-          .bind (4, duration).bind (5, duration).bind (6, file.getFullPathName());
+          .bind (4, key).bind (5, key)
+          .bind (6, duration).bind (7, duration).bind (8, file.getFullPathName());
         st.run();
     }
     notify();
@@ -731,7 +762,7 @@ void Library::analyseLoop()
 {
     {
         const juce::ScopedLock sl (lock);
-        progressLabel = "Analizando BPM";
+        progressLabel = "Analizando BPM y tono";
     }
     progressDone = 0;
     progressTotal = countPending();
@@ -741,27 +772,37 @@ void Library::analyseLoop()
     while (! stop())
     {
         juce::File file;
+        bool hasGrid = false;
+        double bpm = 0.0, firstBeat = 0.0, duration = 0.0;
         {
             const juce::ScopedLock sl (lock);
-            Statement st (db, "SELECT path FROM tracks WHERE analysed = 0 LIMIT 1");
+            Statement st (db, "SELECT path, analysed, bpm, first_beat FROM tracks "
+                              "WHERE analysed = 0 OR (analysed = 1 AND key_analysed = 0) LIMIT 1");
             if (! st.next())
                 break;
             file = juce::File (st.text (0));
+            hasGrid = st.integer (1) == 1;
+            bpm = st.real (2);
+            firstBeat = st.real (3);
         }
 
-        double bpm = 0.0, firstBeat = 0.0, duration = 0.0;
+        juce::String key;
         if (auto track = TrackAnalyser::loadTrack (formats, file, stop))
         {
-            TrackAnalyser::detectBeatgrid (*track, stop);
-            bpm = track->bpm;
-            firstBeat = track->firstBeat;
+            if (! hasGrid)
+            {
+                TrackAnalyser::detectBeatgrid (*track, stop);
+                bpm = track->bpm;
+                firstBeat = track->firstBeat;
+            }
+            key = Camelot::toString (TrackAnalyser::detectKey (*track, stop));
             duration = track->getLength();
         }
 
         if (stop())
             break;
 
-        setAnalysis (file, bpm, firstBeat, duration);   // bpm 0 -> marcada como error (no se reintenta)
+        setAnalysis (file, bpm, firstBeat, duration, key);   // bpm 0 -> marcada como error (no se reintenta)
         ++progressDone;
     }
 }

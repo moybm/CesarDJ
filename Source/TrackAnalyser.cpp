@@ -1,6 +1,7 @@
 #include "TrackAnalyser.h"
 #include <juce_dsp/juce_dsp.h>
 #include "TagReader.h"
+#include "Camelot.h"
 
 namespace
 {
@@ -281,4 +282,105 @@ void TrackAnalyser::detectBeatgrid (Track& track, const std::function<bool()>& s
 
     track.bpm = bestBpm;
     track.firstBeat = first;
+}
+
+//==============================================================================
+int TrackAnalyser::detectKey (const Track& track, const std::function<bool()>& shouldStop)
+{
+    // 1) Mono y a 1/4 de la frecuencia de muestreo (basta para las notas que definen la tonalidad)
+    constexpr int decimation = 4;
+    const int n = track.numSamples() / decimation;
+    const double sr = track.sampleRate / decimation;
+    if (n < 16384)
+        return -1;
+
+    std::vector<float> mono ((size_t) n);
+    const float* L = track.audio.getReadPointer (0);
+    const float* R = track.audio.getReadPointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        float s = 0.0f;
+        for (int k = 0; k < decimation; ++k)
+            s += L[i * decimation + k] + R[i * decimation + k];
+        mono[(size_t) i] = s / (2.0f * decimation);
+    }
+
+    // 2) Cromagrama: energía de cada una de las 12 notas entre La1 (55 Hz) y La6 (1760 Hz)
+    constexpr int fftOrder = 13;
+    constexpr int fftSize = 1 << fftOrder;
+    constexpr int hop = fftSize / 2;
+
+    juce::dsp::FFT fft (fftOrder);
+    juce::dsp::WindowingFunction<float> window ((size_t) fftSize, juce::dsp::WindowingFunction<float>::hann);
+    std::vector<float> buffer ((size_t) fftSize * 2);
+
+    // A qué nota pertenece cada bin (precalculado)
+    std::vector<int> binNote ((size_t) fftSize / 2, -1);
+    for (int b = 1; b < fftSize / 2; ++b)
+    {
+        const double f = b * sr / fftSize;
+        if (f >= 55.0 && f <= 1760.0)
+            binNote[(size_t) b] = ((int) std::lround (69.0 + 12.0 * std::log2 (f / 440.0)) % 12 + 12) % 12;
+    }
+
+    std::array<double, 12> chroma {};
+    for (int start = 0; start + fftSize < n; start += hop)
+    {
+        if (shouldStop())
+            return -1;
+
+        std::copy (mono.begin() + start, mono.begin() + start + fftSize, buffer.begin());
+        window.multiplyWithWindowingTable (buffer.data(), (size_t) fftSize);
+        fft.performFrequencyOnlyForwardTransform (buffer.data(), true);
+
+        std::array<double, 12> frame {};
+        double total = 0.0;
+        for (int b = 1; b < fftSize / 2; ++b)
+            if (binNote[(size_t) b] >= 0)
+            {
+                const double e = buffer[(size_t) b];      // lineal: los armónicos pesan menos que las fundamentales
+                frame[(size_t) binNote[(size_t) b]] += e;
+                total += e;
+            }
+
+        // Cada trozo pesa igual: los pasajes fuertes no dominan
+        if (total > 1.0e-6)
+            for (int k = 0; k < 12; ++k)
+                chroma[(size_t) k] += frame[(size_t) k] / total;
+    }
+
+    // 3) Correlación con los perfiles mayor y menor de Krumhansl-Kessler en las 12 tónicas
+    static const double majorProfile[] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+    static const double minorProfile[] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+
+    auto correlation = [&chroma] (const double* profile, int root)
+    {
+        double mc = 0.0, mp = 0.0;
+        for (int k = 0; k < 12; ++k) { mc += chroma[(size_t) k]; mp += profile[k]; }
+        mc /= 12.0; mp /= 12.0;
+
+        double num = 0.0, dc = 0.0, dp = 0.0;
+        for (int k = 0; k < 12; ++k)
+        {
+            const double c = chroma[(size_t) ((k + root) % 12)] - mc;
+            const double p = profile[k] - mp;
+            num += c * p; dc += c * c; dp += p * p;
+        }
+        return dc > 0.0 && dp > 0.0 ? num / std::sqrt (dc * dp) : 0.0;
+    };
+
+    int best = -1;
+    double bestScore = 0.0;
+    for (int root = 0; root < 12; ++root)
+        for (int minor = 0; minor < 2; ++minor)
+        {
+            const double score = correlation (minor ? minorProfile : majorProfile, root);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = Camelot::fromRoot (root, minor == 1);
+            }
+        }
+
+    return bestScore > 0.3 ? best : -1;
 }
