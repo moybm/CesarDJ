@@ -24,6 +24,8 @@ public:
     std::function<double()> referenceBpm;                                  // BPM del deck que suena (filtro)
     std::function<int()> referenceKey;                                     // tonalidad del deck que suena
     std::function<void (const juce::Array<juce::File>&)> onPrepareStems;   // stems con IA en lote
+    std::function<void()> onImportFile, onImportSpotify;                   // importar listas
+    std::function<void (juce::int64, const juce::String&)> onExportPlaylist;
 
     void markPlayedThisSession (const juce::File& file);
     void focusSearch()                          { searchBox.grabKeyboardFocus(); }
@@ -64,7 +66,9 @@ private:
     juce::PropertiesFile& settings;
 
     LibraryTree tree { library };
-    juce::TextButton addFolderButton { "+ Carpeta" }, addListButton { "+ Lista" };
+    juce::TextButton addFolderButton { "+ Carpeta" }, addListButton { "+ Lista" }, importButton { "Importar" };
+    void showImportMenu();
+    void showWantedMenu (int row);
 
     juce::TextEditor searchBox;
     juce::TextButton bpmFilterButton { juce::String::fromUTF8 ("BPM ±6%") }, keyFilterButton { juce::String::fromUTF8 ("ARMÓNICO") }, analyseButton;

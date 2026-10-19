@@ -71,6 +71,14 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     addAndMakeVisible (addFolderButton);
     addAndMakeVisible (addListButton);
 
+    importButton.setTooltip (juce::String::fromUTF8 ("Importar listas de Spotify, Apple Music, Deezer, TIDAL, YouTube Music (CSV) o M3U"));
+    importButton.onClick = [this] { showImportMenu(); };
+    addAndMakeVisible (importButton);
+
+    tree.onImportFile = [this] { if (onImportFile) onImportFile(); };
+    tree.onImportSpotify = [this] { if (onImportSpotify) onImportSpotify(); };
+    tree.onExportPlaylist = [this] (juce::int64 id, const juce::String& name) { if (onExportPlaylist) onExportPlaylist (id, name); };
+
     // ---- Buscador y herramientas
     searchBox.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Buscar título, artista, álbum o género..."), textDim);
     searchBox.setFont (juce::FontOptions (14.0f));
@@ -148,7 +156,7 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     addAndMakeVisible (loadA);
     addAndMakeVisible (loadB);
 
-    for (auto* c : { (juce::Component*) &addFolderButton, (juce::Component*) &addListButton, (juce::Component*) &bpmFilterButton,
+    for (auto* c : { (juce::Component*) &addFolderButton, (juce::Component*) &addListButton, (juce::Component*) &importButton, (juce::Component*) &bpmFilterButton,
                      (juce::Component*) &analyseButton, (juce::Component*) &keyFilterButton, (juce::Component*) &loadA, (juce::Component*) &loadB,
                      (juce::Component*) &emptyAddButton })
         c->setWantsKeyboardFocus (false);
@@ -181,7 +189,7 @@ void BrowserComponent::refreshRows()
     // Recordar la selección para restaurarla
     std::set<juce::int64> selectedKeys;
     const bool byEntry = view.type == LibraryView::Type::playlist || view.type == LibraryView::Type::history
-                         || view.type == LibraryView::Type::automix;
+                         || view.type == LibraryView::Type::automix || view.type == LibraryView::Type::wanted;
     const auto sel = table.getSelectedRows();
     for (int i = 0; i < sel.size(); ++i)
         if (sel[i] < (int) rows.size())
@@ -380,7 +388,12 @@ void BrowserComponent::cellClicked (int row, int column, const juce::MouseEvent&
 
 void BrowserComponent::cellDoubleClicked (int row, int, const juce::MouseEvent&)
 {
-    if (row >= 0 && row < (int) rows.size() && onLoadRequest != nullptr)
+    if (row < 0 || row >= (int) rows.size())
+        return;
+
+    if (view.type == LibraryView::Type::wanted)
+        showWantedMenu (row);
+    else if (onLoadRequest != nullptr)
         onLoadRequest (rows[(size_t) row].file, -1);
 }
 
@@ -392,6 +405,12 @@ void BrowserComponent::returnKeyPressed (int lastRowSelected)
 
 void BrowserComponent::deleteKeyPressed (int)
 {
+    if (view.type == LibraryView::Type::wanted)
+    {
+        library.removeWanted (selectedEntryIds());
+        return;
+    }
+
     if (view.type == LibraryView::Type::playlist)
     {
         library.removeFromPlaylist (selectedEntryIds());
@@ -431,7 +450,7 @@ void BrowserComponent::sortOrderChanged (int columnId, bool forwards)
 
 juce::var BrowserComponent::getDragSourceDescription (const juce::SparseSet<int>& selectedRows)
 {
-    if (selectedRows.isEmpty() || selectedRows[0] >= (int) rows.size())
+    if (selectedRows.isEmpty() || selectedRows[0] >= (int) rows.size() || view.type == LibraryView::Type::wanted)
         return {};
 
     juce::StringArray ids;
@@ -469,8 +488,62 @@ const LibraryTrack* BrowserComponent::selectedTrack() const
     return row >= 0 && row < (int) rows.size() ? &rows[(size_t) row] : nullptr;
 }
 
+void BrowserComponent::showImportMenu()
+{
+    juce::PopupMenu m;
+    m.addSectionHeader ("Importar una lista");
+    m.addItem ("Desde un archivo CSV o M3U...", [this] { if (onImportFile) onImportFile(); });
+    m.addItem ("Desde tu cuenta de Spotify...", [this] { if (onImportSpotify) onImportSpotify(); });
+    m.addSeparator();
+    m.addItem (juce::String::fromUTF8 ("Cómo conseguir el CSV de Spotify, Apple Music, Deezer, TIDAL..."), []
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Exportar listas a CSV",
+            juce::String::fromUTF8 (
+                "Spotify: entra en exportify.app, inicia sesión y pulsa \"Export\" en la lista.\n\n"
+                "Apple Music, Deezer, TIDAL, YouTube Music, Amazon Music...: entra en tunemymusic.com, "
+                "elige la plataforma de origen y como destino \"Archivo\" (CSV).\n\n"
+                "Después, en CesarDJ: Importar > Desde un archivo CSV o M3U."));
+    });
+    if (view.type == LibraryView::Type::playlist)
+    {
+        m.addSeparator();
+        m.addItem ("Exportar esta lista a M3U...", [this] { if (onExportPlaylist) onExportPlaylist (view.playlistId, viewTitle); });
+    }
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (importButton));
+}
+
+// Canciones que faltan: buscarlas en tiendas o plataformas (en el navegador web)
+void BrowserComponent::showWantedMenu (int row)
+{
+    if (! table.isRowSelected (row))
+        table.selectRow (row);
+
+    const auto& t = rows[(size_t) row];
+    const auto query = juce::URL::addEscapeChars ((t.artist + " " + t.title).trim(), true);
+    const auto entries = selectedEntryIds();
+
+    juce::PopupMenu m;
+    m.addSectionHeader (t.artist.isNotEmpty() ? t.artist + " - " + t.title : t.title);
+    m.addItem ("Buscar en Beatport",  [query] { juce::URL ("https://www.beatport.com/search?q=" + query).launchInDefaultBrowser(); });
+    m.addItem ("Buscar en Bandcamp",  [query] { juce::URL ("https://bandcamp.com/search?q=" + query).launchInDefaultBrowser(); });
+    m.addItem ("Buscar en Traxsource", [query] { juce::URL ("https://www.traxsource.com/search?term=" + query).launchInDefaultBrowser(); });
+    m.addItem ("Buscar en Amazon Music", [query] { juce::URL ("https://www.amazon.es/s?i=digital-music&k=" + query).launchInDefaultBrowser(); });
+    m.addItem ("Buscar en YouTube",   [query] { juce::URL ("https://www.youtube.com/results?search_query=" + query).launchInDefaultBrowser(); });
+    m.addItem ("Buscar en Google",    [query] { juce::URL ("https://www.google.com/search?q=" + query).launchInDefaultBrowser(); });
+    m.addSeparator();
+    m.addItem ("Copiar \"artista - título\"", [t] { juce::SystemClipboard::copyTextToClipboard ((t.artist.isNotEmpty() ? t.artist + " - " : juce::String()) + t.title); });
+    m.addItem ("Quitar de \"Por conseguir\"", [this, entries] { library.removeWanted (entries); });
+    m.showMenuAsync (juce::PopupMenu::Options());
+}
+
 void BrowserComponent::showTrackMenu (int row)
 {
+    if (view.type == LibraryView::Type::wanted)
+    {
+        showWantedMenu (row);
+        return;
+    }
+
     if (! table.isRowSelected (row))
         table.selectRow (row);
 
@@ -674,8 +747,10 @@ void BrowserComponent::resized()
     // Izquierda: árbol + botones
     auto left = area.removeFromLeft (juce::jmin (250, area.getWidth() / 6 + 40));
     auto leftButtons = left.removeFromBottom (30);
-    addFolderButton.setBounds (leftButtons.removeFromLeft (leftButtons.getWidth() / 2).reduced (0, 0).withTrimmedRight (2));
-    addListButton.setBounds (leftButtons.withTrimmedLeft (2));
+    const int bw = leftButtons.getWidth() / 3;
+    addFolderButton.setBounds (leftButtons.removeFromLeft (bw).withTrimmedRight (2));
+    addListButton.setBounds (leftButtons.removeFromLeft (bw).withTrimmedRight (2));
+    importButton.setBounds (leftButtons);
     left.removeFromBottom (6);
     tree.setBounds (left);
     area.removeFromLeft (6);

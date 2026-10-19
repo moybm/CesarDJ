@@ -1,6 +1,7 @@
 #include "Library.h"
 #include "TrackAnalyser.h"
 #include "Camelot.h"
+#include "TrackMatcher.h"
 #include <sqlite3.h>
 #include <deque>
 
@@ -306,6 +307,25 @@ void Library::migrate()
         version = 3;
     }
 
+    // v4: canciones de listas importadas que aún no están en la biblioteca
+    if (version < 4)
+    {
+        exec (R"sql(
+            CREATE TABLE IF NOT EXISTS wanted (
+                id          INTEGER PRIMARY KEY,
+                playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
+                position    INTEGER DEFAULT 0,
+                title       TEXT DEFAULT '',
+                artist      TEXT DEFAULT '',
+                album       TEXT DEFAULT '',
+                duration    REAL DEFAULT 0,
+                source      TEXT DEFAULT '',
+                added       INTEGER DEFAULT 0
+            );
+        )sql");
+        version = 4;
+    }
+
     // (las próximas versiones añaden aquí su "if (version < N)")
 
     exec (("PRAGMA user_version = " + juce::String (juce::jmax (version, schemaVersion))).toRawUTF8());
@@ -321,6 +341,9 @@ std::vector<LibraryTrack> Library::query (const LibraryView& view, const juce::S
     std::vector<LibraryTrack> result;
     if (db == nullptr)
         return result;
+
+    if (view.type == LibraryView::Type::wanted)
+        return wantedTracks (search);
 
     juce::String sql, defaultOrder;
     juce::StringArray where;
@@ -486,6 +509,7 @@ void Library::addFileAsync (const juce::File& file)
             duration = (double) r->lengthInSamples / r->sampleRate;
 
         insertOrUpdate (file, TagReader::read (file), duration);
+        resolveWanted();
         notify();
     });
 }
@@ -567,6 +591,7 @@ void Library::scanFolder (const juce::File& folder)
         }
     }
 
+    resolveWanted();
     notify();
 }
 
@@ -839,6 +864,178 @@ int Library::automixCount()
     const juce::ScopedLock sl (lock);
     Statement st (db, "SELECT COUNT(*) FROM automix_queue");
     return st.next() ? (int) st.integer (0) : 0;
+}
+
+//==============================================================================
+// Listas importadas y "Por conseguir"
+//==============================================================================
+juce::int64 Library::ensureTrack (const juce::File& file)
+{
+    if (auto t = findByFile (file))
+        return t->id;
+
+    double duration = 0.0;
+    if (std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (file)); r != nullptr && r->sampleRate > 0)
+        duration = (double) r->lengthInSamples / r->sampleRate;
+    insertOrUpdate (file, TagReader::read (file), duration);
+
+    auto t = findByFile (file);
+    return t.has_value() ? t->id : 0;
+}
+
+juce::int64 Library::createUniquePlaylist (const juce::String& name)
+{
+    juce::StringArray existing;
+    for (auto& p : getPlaylists())
+        existing.add (p.name);
+
+    auto unique = name.isEmpty() ? juce::String ("Lista importada") : name;
+    for (int n = 2; existing.contains (unique); ++n)
+        unique = name + " (" + juce::String (n) + ")";
+
+    return createPlaylist (unique);
+}
+
+void Library::addToPlaylistAt (juce::int64 playlistId, const std::vector<std::pair<juce::int64, int>>& trackAndPosition)
+{
+    {
+        const juce::ScopedLock sl (lock);
+        exec ("BEGIN");
+        Statement st (db, "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)");
+        for (auto& [id, position] : trackAndPosition)
+        {
+            st.bind (1, playlistId).bind (2, id).bind (3, position).run();
+            st.reset();
+        }
+        exec ("COMMIT");
+    }
+    notify();
+}
+
+void Library::addWanted (juce::int64 playlistId, const juce::String& source, const std::vector<LibraryTrack>& missing,
+                         const std::vector<int>& positions)
+{
+    {
+        const juce::ScopedLock sl (lock);
+        exec ("BEGIN");
+        Statement st (db, "INSERT INTO wanted (playlist_id, position, title, artist, album, duration, source, added) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        for (size_t i = 0; i < missing.size(); ++i)
+        {
+            const auto& t = missing[i];
+            st.bind (1, playlistId).bind (2, i < positions.size() ? positions[i] : 0)
+              .bind (3, t.title).bind (4, t.artist).bind (5, t.album).bind (6, t.duration)
+              .bind (7, source).bind (8, juce::Time::currentTimeMillis() / 1000);
+            st.run();
+            st.reset();
+        }
+        exec ("COMMIT");
+    }
+    notify();
+}
+
+void Library::removeWanted (const juce::Array<juce::int64>& wantedIds)
+{
+    {
+        const juce::ScopedLock sl (lock);
+        exec ("BEGIN");
+        Statement st (db, "DELETE FROM wanted WHERE id = ?");
+        for (auto id : wantedIds)
+        {
+            st.bind (1, id).run();
+            st.reset();
+        }
+        exec ("COMMIT");
+    }
+    notify();
+}
+
+void Library::clearWanted()
+{
+    exec ("DELETE FROM wanted");
+    notify();
+}
+
+int Library::wantedCount()
+{
+    const juce::ScopedLock sl (lock);
+    Statement st (db, "SELECT COUNT(*) FROM wanted");
+    return st.next() ? (int) st.integer (0) : 0;
+}
+
+std::vector<LibraryTrack> Library::wantedTracks (const juce::String& search)
+{
+    std::vector<LibraryTrack> out;
+    const juce::ScopedLock sl (lock);
+    Statement st (db, "SELECT w.id, w.title, w.artist, w.album, w.duration, w.source, COALESCE(p.name, '') "
+                      "FROM wanted w LEFT JOIN playlists p ON p.id = w.playlist_id ORDER BY w.source, w.position");
+    const auto words = juce::StringArray::fromTokens (search.toLowerCase(), true);
+
+    while (st.next())
+    {
+        LibraryTrack t;
+        t.entryId = st.integer (0);
+        t.title = st.text (1);
+        t.artist = st.text (2);
+        t.album = st.text (3);
+        t.duration = st.real (4);
+        t.comment = st.text (5);                    // origen (Spotify, CSV...)
+        t.genre = st.text (6);                      // lista a la que irá
+
+        const auto haystack = (t.title + " " + t.artist + " " + t.album + " " + t.genre).toLowerCase();
+        bool ok = true;
+        for (auto& w : words)
+            ok = ok && (w.isEmpty() || haystack.contains (w));
+        if (ok)
+            out.push_back (std::move (t));
+    }
+    return out;
+}
+
+std::vector<LibraryTrack> Library::allTracks()
+{
+    return query ({}, {}, {}, true);
+}
+
+// Busca en la biblioteca las canciones que faltaban y las coloca en su lista, en su posición original
+int Library::resolveWanted()
+{
+    if (db == nullptr || wantedCount() == 0)
+        return 0;
+
+    const auto library = allTracks();
+    std::vector<TrackMatcher::Key> keys;
+    keys.reserve (library.size());
+    for (auto& t : library)
+        keys.push_back (TrackMatcher::makeKey (t.title, t.artist, t.duration));
+
+    struct Hit { juce::int64 wantedId, playlistId, trackId; int position; };
+    std::vector<Hit> hits;
+    {
+        const juce::ScopedLock sl (lock);
+        Statement st (db, "SELECT id, COALESCE(playlist_id, 0), position, title, artist, duration FROM wanted");
+        while (st.next())
+        {
+            const auto want = TrackMatcher::makeKey (st.text (3), st.text (4), st.real (5));
+            double best = 0.0;
+            size_t bestIndex = 0;
+            for (size_t i = 0; i < keys.size(); ++i)
+            {
+                const double s = TrackMatcher::score (want, keys[i]);
+                if (s > best) { best = s; bestIndex = i; }
+            }
+            if (best >= TrackMatcher::matchThreshold)
+                hits.push_back ({ st.integer (0), st.integer (1), library[bestIndex].id, (int) st.integer (2) });
+        }
+    }
+
+    for (auto& h : hits)
+    {
+        if (h.playlistId > 0)
+            addToPlaylistAt (h.playlistId, { { h.trackId, h.position } });
+        removeWanted ({ h.wantedId });
+    }
+    return (int) hits.size();
 }
 
 void Library::clearHistory()

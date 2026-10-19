@@ -32,7 +32,7 @@ struct LibraryPlaylist
 // Qué se está viendo en el navegador
 struct LibraryView
 {
-    enum class Type { all, recentlyAdded, history, playlist, folder, automix };
+    enum class Type { all, recentlyAdded, history, playlist, folder, automix, wanted };
     Type type = Type::all;
     juce::int64 playlistId = 0;
     juce::File folder;
@@ -96,6 +96,19 @@ public:
     std::optional<LibraryTrack> automixNext();          // primera de la cola (entryId = su fila)
     int automixCount();
 
+    //== Listas importadas (Spotify, CSV, M3U) y "Por conseguir" =====================
+    juce::int64 ensureTrack (const juce::File& file);   // añade la canción ya mismo si no estaba; devuelve su id
+    juce::int64 createUniquePlaylist (const juce::String& name);
+    void addToPlaylistAt (juce::int64 playlistId, const std::vector<std::pair<juce::int64, int>>& trackAndPosition);
+    // Canciones que faltan: se guardan con su lista y posición para colocarlas solas cuando aparezcan
+    void addWanted (juce::int64 playlistId, const juce::String& source, const std::vector<LibraryTrack>& missing,
+                    const std::vector<int>& positions);
+    void removeWanted (const juce::Array<juce::int64>& wantedIds);
+    void clearWanted();
+    int wantedCount();
+    int resolveWanted();                                // devuelve cuántas se han encontrado
+    std::vector<LibraryTrack> allTracks();
+
     //== Trabajo en segundo plano ================================================
     void analysePending();                              // BPM de todas las canciones sin analizar
     void cancelAnalysis()                               { cancelAnalysisFlag = true; }
@@ -109,12 +122,13 @@ private:
 
     // Versión del esquema de la base de datos. Cada actualización de CesarDJ que cambie la base de datos
     // sube este número y añade su paso en migrate(): las bibliotecas antiguas se actualizan solas al abrirlas.
-    static constexpr int schemaVersion = 3;
+    static constexpr int schemaVersion = 4;
 
     void exec (const char* sql);
     void createSchema();
     void migrate();
     void scanFolder (const juce::File& folder);
+    std::vector<LibraryTrack> wantedTracks (const juce::String& search);
     void analyseLoop();
     void insertOrUpdate (const juce::File& file, const TagInfo& tags, double duration);
     void notify()                                       { sendChangeMessage(); }

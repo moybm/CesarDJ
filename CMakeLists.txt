@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CesarDJ VERSION 0.8.0)
+project(CesarDJ VERSION 0.9.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -126,7 +126,8 @@ target_sources(CesarDJ PRIVATE
     Source/MidiController.cpp
     Source/Branding.cpp
     Source/Automix.cpp
-    Source/StemSeparator.cpp)
+    Source/StemSeparator.cpp
+    Source/PlaylistImport.cpp)
 
 target_compile_definitions(CesarDJ PRIVATE
     JUCE_WEB_BROWSER=0
@@ -150,6 +151,7 @@ target_link_libraries(CesarDJ
         juce::juce_audio_devices
         juce::juce_audio_formats
         juce::juce_gui_extra
+        juce::juce_cryptography
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

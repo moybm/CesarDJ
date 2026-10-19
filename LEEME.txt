@@ -58,6 +58,18 @@ TRUCOS
     la primera vez; despues se guardan en %LOCALAPPDATA%\CesarDJ\Stems
     y cargan al instante. Clic derecho en canciones > "Preparar stems con
     IA" para dejarlas listas por adelantado (por ejemplo, de noche).
+  - IMPORTAR LISTAS (boton "Importar", abajo a la izquierda):
+      * Desde tu cuenta de Spotify: la primera vez el asistente te explica
+        como crear tu "app" gratuita de Spotify (Client ID). Inicias sesion
+        en la web de Spotify; CesarDJ solo lee titulos y artistas.
+      * Desde un CSV (Spotify via exportify.app; Apple Music, Deezer, TIDAL,
+        YouTube Music... via tunemymusic.com) o un M3U/M3U8 de otro programa.
+    CesarDJ busca cada cancion en tu biblioteca y crea la lista. Las que
+    faltan van a "Por conseguir": clic derecho para buscarlas en Beatport,
+    Bandcamp, YouTube... y cuando las anadas a tu carpeta de musica se
+    colocan solas en su lista. El audio de las plataformas no se usa
+    (no lo permiten): la musica tiene que estar en tu equipo.
+  - Clic derecho en una lista > "Exportar a M3U" para llevarla a otro programa.
   - REC graba la sesion en WAV de 24 bits.
   - MIDI: conecta tu controladora, pulsa Ctrl+M, haz clic en un control de
     la pantalla y muevelo en la controladora.

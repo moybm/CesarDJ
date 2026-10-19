@@ -5,7 +5,7 @@ using namespace DJColours;
 
 namespace
 {
-    enum class Kind { root, all, recent, history, automix, playlistsHeader, playlist, foldersHeader, folder };
+    enum class Kind { root, all, recent, history, automix, wanted, playlistsHeader, playlist, foldersHeader, folder };
 
     // Iconos dibujados (no dependen de las fuentes del sistema)
     void drawIcon (juce::Graphics& g, Kind kind, juce::Rectangle<float> r, juce::Colour c)
@@ -60,6 +60,16 @@ namespace
                 g.fillRect (cx + 6.0f, cy + 2.5f, 2.5f, 4.5f);
                 break;
             }
+            case Kind::wanted:
+            {
+                // Lupa
+                g.drawEllipse (cx - 7.0f, cy - 7.0f, 10.0f, 10.0f, 1.8f);
+                juce::Path handle;
+                handle.startNewSubPath (cx + 1.5f, cy + 1.5f);
+                handle.lineTo (cx + 6.5f, cy + 6.5f);
+                g.strokePath (handle, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                break;
+            }
             case Kind::root:
                 break;
         }
@@ -102,6 +112,7 @@ public:
                : kind == Kind::playlist ? LibraryView::Type::playlist
                : kind == Kind::folder   ? LibraryView::Type::folder
                : kind == Kind::automix  ? LibraryView::Type::automix
+               : kind == Kind::wanted   ? LibraryView::Type::wanted
                                         : LibraryView::Type::all;
         v.playlistId = playlistId;
         v.folder = folder;
@@ -126,6 +137,7 @@ public:
                               : kind == Kind::all      ? deckA
                               : kind == Kind::history  ? cue
                               : kind == Kind::automix  ? play
+                              : kind == Kind::wanted   ? juce::Colour (0xffe8c33a)
                                                        : textDim;
         drawIcon (g, kind, area.removeFromLeft (24).toFloat(), header ? textDim : iconColour);
 
@@ -196,6 +208,9 @@ private:
         {
             case Kind::playlistsHeader:
                 m.addItem ("Nueva lista...", [this] { tree.askNewPlaylist(); });
+                m.addSeparator();
+                m.addItem ("Importar lista (CSV / M3U)...", [this] { if (tree.onImportFile) tree.onImportFile(); });
+                m.addItem ("Importar de Spotify...", [this] { if (tree.onImportSpotify) tree.onImportSpotify(); });
                 break;
 
             case Kind::playlist:
@@ -204,6 +219,7 @@ private:
                 const auto name = label;
                 m.addItem ("Renombrar...", [this] { rename(); });
                 m.addItem ("Enviar lista a Automix", [&lib, id] { lib.addPlaylistToAutomix (id); });
+                m.addItem ("Exportar a M3U...", [this, id, name] { if (tree.onExportPlaylist) tree.onExportPlaylist (id, name); });
                 m.addItem ("Eliminar lista", [&lib, id, name]
                 {
                     juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Eliminar lista",
@@ -239,6 +255,11 @@ private:
 
             case Kind::automix:
                 m.addItem ("Vaciar Automix", [&lib] { lib.clearAutomix(); });
+                break;
+
+            case Kind::wanted:
+                m.addItem ("Buscar coincidencias en la biblioteca ahora", [&lib] { lib.resolveWanted(); });
+                m.addItem ("Vaciar \"Por conseguir\"", [&lib] { lib.clearWanted(); });
                 break;
 
             case Kind::all:
@@ -290,6 +311,8 @@ void LibraryTree::refresh()
     newRoot->addSubItem (new LibraryTreeItem (*this, Kind::recent, juce::String::fromUTF8 ("Añadidas recientemente")));
     newRoot->addSubItem (new LibraryTreeItem (*this, Kind::history, "Historial"));
     newRoot->addSubItem (new LibraryTreeItem (*this, Kind::automix, "Automix", 0, {}, library.automixCount()));
+    if (const int wanted = library.wantedCount(); wanted > 0)
+        newRoot->addSubItem (new LibraryTreeItem (*this, Kind::wanted, "Por conseguir", 0, {}, wanted));
 
     auto* lists = new LibraryTreeItem (*this, Kind::playlistsHeader, "Listas");
     for (auto& p : library.getPlaylists())

@@ -14,6 +14,7 @@
 #include "Branding.h"
 #include "Automix.h"
 #include "StemSeparator.h"
+#include "PlaylistImport.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -80,6 +81,7 @@ private:
     DeckComponent deckViewB { 1, deckB, deckA, sampler };
     MixerComponent mixerView { mixer, sampler };
     BrowserComponent browser { library, settings };
+    PlaylistImporter importer { library, settings };
 
     juce::Slider masterVolume { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::TextButton audioButton { "AUDIO" }, midiButton { "MIDI" }, recButton { "REC" }, automixButton { "AUTOMIX" };

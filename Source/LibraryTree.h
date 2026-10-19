@@ -15,6 +15,8 @@ public:
     void selectView (const LibraryView& view);
 
     std::function<void (const LibraryView&, const juce::String& title)> onViewSelected;
+    std::function<void()> onImportFile, onImportSpotify;
+    std::function<void (juce::int64 playlistId, const juce::String& name)> onExportPlaylist;
 
     void askNewPlaylist (const juce::Array<juce::int64>& tracksToAdd = {});
     void askAddFolder();

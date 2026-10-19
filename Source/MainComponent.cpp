@@ -60,6 +60,20 @@ MainComponent::MainComponent()
     };
     mixerView.onModeChanged = [this] (bool stems) { settings.setValue ("mixerStems", stems); };
     mixerView.setStemMode (settings.getBoolValue ("mixerStems", false));
+    browser.onImportFile = [this] { importer.importFromFile(); };
+    browser.onImportSpotify = [this] { importer.importFromSpotify(); };
+    browser.onExportPlaylist = [this] (juce::int64 id, const juce::String& name) { importer.exportPlaylist (id, name); };
+    importer.onStatus = [this] (const juce::String& msg)
+    {
+        if (msg.isEmpty())
+            statusMessageUntil = 0;
+        else
+        {
+            showStatus (msg);
+            statusMessageUntil = juce::Time::getMillisecondCounter() + 60000;
+        }
+    };
+
     browser.onPrepareStems = [this] (const juce::Array<juce::File>& files)
     {
         stemWorker.enqueueFiles (files);
