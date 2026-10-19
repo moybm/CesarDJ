@@ -136,8 +136,9 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     table.getViewport()->setScrollBarThickness (10);
     addAndMakeVisible (table);
 
-    emptyLabel.setText (juce::String::fromUTF8 ("Tu biblioteca está vacía.\nAñade la carpeta donde tienes tu música: se escanea en segundo plano ")
-                        + juce::String::fromUTF8 ("y después puedes analizar el BPM de todas las canciones."), juce::dontSendNotification);
+    emptyLibraryText = juce::String::fromUTF8 ("Tu biblioteca está vacía.\nAñade la carpeta donde tienes tu música: se escanea en segundo plano ")
+                       + juce::String::fromUTF8 ("y después puedes analizar el BPM de todas las canciones.");
+    emptyLabel.setText (emptyLibraryText, juce::dontSendNotification);
     emptyLabel.setJustificationType (juce::Justification::centred);
     emptyLabel.setColour (juce::Label::textColourId, textDim);
     emptyLabel.setFont (juce::FontOptions (14.0f));
@@ -151,8 +152,8 @@ BrowserComponent::BrowserComponent (Library& lib, juce::PropertiesFile& props)
     // ---- Panel de información
     loadA.setColour (juce::TextButton::buttonColourId, deckA.darker (0.4f));
     loadB.setColour (juce::TextButton::buttonColourId, deckB.darker (0.4f));
-    loadA.onClick = [this] { if (auto* t = selectedTrack()) if (onLoadRequest) onLoadRequest (t->file, 0); };
-    loadB.onClick = [this] { if (auto* t = selectedTrack()) if (onLoadRequest) onLoadRequest (t->file, 1); };
+    loadA.onClick = [this] { if (auto* t = selectedTrack()) if (onLoadRequest && ! isMissing (*t)) onLoadRequest (t->file, 0); };
+    loadB.onClick = [this] { if (auto* t = selectedTrack()) if (onLoadRequest && ! isMissing (*t)) onLoadRequest (t->file, 1); };
     addAndMakeVisible (loadA);
     addAndMakeVisible (loadB);
 
@@ -206,7 +207,8 @@ void BrowserComponent::refreshRows()
         }
     }
 
-    rows = library.query (view, searchBox.getText(), sortColumn, sortAscending, bpmMin, bpmMax);
+    rows = view.type == LibraryView::Type::spotify ? spotifyRows()
+                                                   : library.query (view, searchBox.getText(), sortColumn, sortAscending, bpmMin, bpmMax);
 
     // Filtro armónico (en memoria: la tonalidad puede venir en notación Camelot o musical)
     if (keyFilterButton.getToggleState() && referenceKey != nullptr && referenceKey() >= 0)
@@ -226,12 +228,62 @@ void BrowserComponent::refreshRows()
 
     const bool libraryEmpty = rows.empty() && view.type == LibraryView::Type::all
                               && searchBox.isEmpty() && library.countTracks() == 0;
-    emptyLabel.setVisible (libraryEmpty);
+    const bool loading = view.type == LibraryView::Type::spotify && spotifyLoading == view.externalId;
+    emptyLabel.setText (loading ? juce::String::fromUTF8 ("Cargando la lista de Spotify...") : emptyLibraryText, juce::dontSendNotification);
+    emptyLabel.setVisible (libraryEmpty || loading);
     emptyAddButton.setVisible (libraryEmpty);
 
     table.repaint();
     updateInfo();
     repaint (titleArea);
+}
+
+// Lista de Spotify: se pide una vez (en segundo plano) y se guarda; el buscador filtra en memoria
+std::vector<LibraryTrack> BrowserComponent::spotifyRows()
+{
+    const auto id = view.externalId;
+    auto it = spotifyCache.find (id);
+    if (it == spotifyCache.end())
+    {
+        if (spotifyLoading != id && fetchSpotify != nullptr)
+        {
+            spotifyLoading = id;
+            juce::Component::SafePointer<BrowserComponent> safe (this);
+            fetchSpotify (id, [safe, id] (std::vector<LibraryTrack> result)
+            {
+                if (safe == nullptr)
+                    return;
+                safe->spotifyCache[id] = std::move (result);
+                if (safe->spotifyLoading == id)
+                    safe->spotifyLoading.clear();
+                if (safe->view.type == LibraryView::Type::spotify && safe->view.externalId == id)
+                    safe->refreshRows();
+            });
+        }
+        return {};
+    }
+
+    const auto words = juce::StringArray::fromTokens (searchBox.getText().toLowerCase(), " ", "");
+    std::vector<LibraryTrack> out;
+    for (auto& t : it->second)
+    {
+        const auto hay = (t.title + " " + t.artist + " " + t.album + " " + t.genre).toLowerCase();
+        bool ok = true;
+        for (auto& w : words)
+            ok = ok && hay.contains (w);
+        if (ok)
+            out.push_back (t);
+    }
+    return out;
+}
+
+void BrowserComponent::setSpotifyState (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>& lists)
+{
+    spotifyCache.clear();           // al actualizar se vuelven a pedir las canciones
+    spotifyLoading.clear();
+    tree.setSpotifyState (connected, user, lists);
+    if (view.type == LibraryView::Type::spotify)
+        refreshRows();
 }
 
 void BrowserComponent::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -247,6 +299,9 @@ void BrowserComponent::changeListenerCallback (juce::ChangeBroadcaster*)
                 viewTitle = p.name;
                 repaint (titleArea);
             }
+
+    if (view.type != LibraryView::Type::spotify)
+        spotifyCache.clear();
 
     refreshPending = true;
     refreshDueTime = juce::Time::getMillisecondCounter() + 300;
@@ -306,7 +361,18 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int column, int w,
 
     const auto& t = rows[(size_t) row];
     const bool played = playedThisSession.count (t.file.getFullPathName().toLowerCase()) > 0;
-    const auto mainColour = selected ? juce::Colours::white : (played ? textDim : text);
+    const bool missing = view.type == LibraryView::Type::spotify && isMissing (t);
+    const auto mainColour = selected ? juce::Colours::white : (played || missing ? textDim : text);
+
+    if (column == colIndex && view.type == LibraryView::Type::spotify)
+    {
+        const juce::Rectangle<float> dot (10.0f, h * 0.5f - 4.0f, 8.0f, 8.0f);
+        g.setColour (missing ? juce::Colour (0xffe8c33a) : juce::Colour (0xff1ed760));
+        if (missing)
+            g.drawEllipse (dot, 1.4f);
+        else
+            g.fillEllipse (dot);
+    }
     juce::String s;
     auto just = juce::Justification::centredLeft;
 
@@ -321,7 +387,7 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int column, int w,
                 g.fillEllipse (10.0f, h * 0.5f - 3.0f, 6.0f, 6.0f);
             }
             break;
-        case colTitle:    s = t.title; break;
+        case colTitle:    s = missing ? t.title + juce::String::fromUTF8 ("   · falta") : t.title; break;
         case colArtist:   s = t.artist; break;
         case colBpm:
             if (t.bpm > 0.0)
@@ -361,6 +427,9 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int column, int w,
 
 juce::String BrowserComponent::getCellTooltip (int row, int column)
 {
+    if (row >= 0 && row < (int) rows.size() && view.type == LibraryView::Type::spotify)
+        return isMissing (rows[(size_t) row]) ? juce::String::fromUTF8 ("No está en tu biblioteca. Doble clic para buscarla.")
+                                              : juce::String::fromUTF8 ("En tu biblioteca: ") + rows[(size_t) row].file.getFullPathName();
     if (row >= 0 && row < (int) rows.size() && (column == colTitle || column == colArtist))
         return rows[(size_t) row].file.getFullPathName();
     return {};
@@ -391,7 +460,7 @@ void BrowserComponent::cellDoubleClicked (int row, int, const juce::MouseEvent&)
     if (row < 0 || row >= (int) rows.size())
         return;
 
-    if (view.type == LibraryView::Type::wanted)
+    if (view.type == LibraryView::Type::wanted || isMissing (rows[(size_t) row]))
         showWantedMenu (row);
     else if (onLoadRequest != nullptr)
         onLoadRequest (rows[(size_t) row].file, -1);
@@ -399,12 +468,16 @@ void BrowserComponent::cellDoubleClicked (int row, int, const juce::MouseEvent&)
 
 void BrowserComponent::returnKeyPressed (int lastRowSelected)
 {
-    if (lastRowSelected >= 0 && lastRowSelected < (int) rows.size() && onLoadRequest != nullptr)
+    if (lastRowSelected >= 0 && lastRowSelected < (int) rows.size() && onLoadRequest != nullptr
+        && ! isMissing (rows[(size_t) lastRowSelected]))
         onLoadRequest (rows[(size_t) lastRowSelected].file, -1);
 }
 
 void BrowserComponent::deleteKeyPressed (int)
 {
+    if (view.type == LibraryView::Type::spotify)
+        return;                     // la lista es de Spotify: aquí solo se consulta
+
     if (view.type == LibraryView::Type::wanted)
     {
         library.removeWanted (selectedEntryIds());
@@ -454,12 +527,21 @@ juce::var BrowserComponent::getDragSourceDescription (const juce::SparseSet<int>
         return {};
 
     juce::StringArray ids;
+    const LibraryTrack* first = nullptr;
     for (int i = 0; i < selectedRows.size(); ++i)
-        if (selectedRows[i] < (int) rows.size())
-            ids.add (juce::String (rows[(size_t) selectedRows[i]].id));
+        if (selectedRows[i] < (int) rows.size() && ! isMissing (rows[(size_t) selectedRows[i]]))
+        {
+            const auto& t = rows[(size_t) selectedRows[i]];
+            ids.add (juce::String (t.id));
+            if (first == nullptr)
+                first = &t;
+        }
+
+    if (first == nullptr)
+        return {};
 
     // El deck usa el primer archivo; las listas usan todos los ids
-    return "file:" + rows[(size_t) selectedRows[0]].file.getFullPathName() + "|ids:" + ids.joinIntoString (",");
+    return "file:" + first->file.getFullPathName() + "|ids:" + ids.joinIntoString (",");
 }
 
 juce::Array<juce::int64> BrowserComponent::selectedTrackIds() const
@@ -467,7 +549,7 @@ juce::Array<juce::int64> BrowserComponent::selectedTrackIds() const
     juce::Array<juce::int64> ids;
     const auto sel = table.getSelectedRows();
     for (int i = 0; i < sel.size(); ++i)
-        if (sel[i] < (int) rows.size())
+        if (sel[i] < (int) rows.size() && ! isMissing (rows[(size_t) sel[i]]))
             ids.add (rows[(size_t) sel[i]].id);
     return ids;
 }
@@ -532,13 +614,14 @@ void BrowserComponent::showWantedMenu (int row)
     m.addItem ("Buscar en Google",    [query] { juce::URL ("https://www.google.com/search?q=" + query).launchInDefaultBrowser(); });
     m.addSeparator();
     m.addItem ("Copiar \"artista - título\"", [t] { juce::SystemClipboard::copyTextToClipboard ((t.artist.isNotEmpty() ? t.artist + " - " : juce::String()) + t.title); });
-    m.addItem ("Quitar de \"Por conseguir\"", [this, entries] { library.removeWanted (entries); });
+    if (view.type == LibraryView::Type::wanted)
+        m.addItem ("Quitar de \"Por conseguir\"", [this, entries] { library.removeWanted (entries); });
     m.showMenuAsync (juce::PopupMenu::Options());
 }
 
 void BrowserComponent::showTrackMenu (int row)
 {
-    if (view.type == LibraryView::Type::wanted)
+    if (view.type == LibraryView::Type::wanted || isMissing (rows[(size_t) row]))
     {
         showWantedMenu (row);
         return;

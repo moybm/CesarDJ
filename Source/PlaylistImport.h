@@ -32,12 +32,9 @@ class SpotifyClient
 public:
     static constexpr const char* redirectUri = "http://127.0.0.1:8888/callback";
     static constexpr const char* likedId = "__liked__";
+    static constexpr const char* albumPrefix = "album:";
 
-    struct PlaylistInfo
-    {
-        juce::String id, name;
-        int count = 0;
-    };
+    using PlaylistInfo = ExternalPlaylist;
 
     explicit SpotifyClient (juce::PropertiesFile& settings);
 
@@ -45,6 +42,12 @@ public:
     void setClientId (const juce::String& id);
     bool hasSession() const;
     void logout();
+    juce::String getUserName() const;
+
+    // Inicio de sesión (PKCE): la página de Spotify se abre dentro de CesarDJ o en el navegador
+    juce::String makeAuthUrl (const juce::String& challenge, const juce::String& state, bool forceDialog) const;
+    bool exchangeCode (const juce::String& code, const juce::String& verifier, juce::String& error);
+    bool fetchUserName (juce::String& error);
 
     // Todo lo siguiente es bloqueante: llamar desde un hilo de fondo
     bool login (const std::function<bool()>& shouldStop, juce::String& error);
@@ -75,7 +78,19 @@ public:
     void importFromSpotify();
     void exportPlaylist (juce::int64 playlistId, const juce::String& name);
 
+    //== Spotify en el navegador (como VirtualDJ) ===================================
+    bool isSpotifyConnected() const                 { return spotify.hasSession(); }
+    juce::String getSpotifyUser() const             { return spotify.getUserName(); }
+    void loginSpotify();
+    void logoutSpotify();
+    void refreshSpotify();                          // vuelve a leer listas y álbumes
+    void importSpotifyPlaylist (const ExternalPlaylist& playlist);
+    void importAllSpotify();
+    // Canciones de una lista de Spotify, emparejadas con la biblioteca (file vacío = falta)
+    void fetchSpotifyTracks (const juce::String& id, std::function<void (std::vector<LibraryTrack>)> onDone);
+
     std::function<void (const juce::String&)> onStatus;     // mensajes para la barra superior
+    std::function<void (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>&)> onSpotifyState;
 
 private:
     struct Result { juce::String playlistName; int total = 0, found = 0, missing = 0; };
@@ -83,6 +98,10 @@ private:
     Result importPlaylist (const ImportedPlaylist& playlist);
     void report (const Result& r);
     void showSpotifySetup();
+    void startLogin();
+    void finishLogin (const juce::String& code);
+    void publishSpotifyState();
+    const ExternalPlaylist* findSpotifyList (const juce::String& id) const;
     void showSpotifyChooser (std::vector<SpotifyClient::PlaylistInfo> lists);
     void status (const juce::String& text);
 
@@ -92,4 +111,8 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     std::atomic<bool> cancel { false };
+
+    std::vector<ExternalPlaylist> spotifyLists;
+    juce::String pendingVerifier, pendingState;
+    std::unique_ptr<juce::DocumentWindow> loginWindow;
 };

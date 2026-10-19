@@ -5,7 +5,8 @@ using namespace DJColours;
 
 namespace
 {
-    enum class Kind { root, all, recent, history, automix, wanted, playlistsHeader, playlist, foldersHeader, folder };
+    enum class Kind { root, all, recent, history, automix, wanted, playlistsHeader, playlist, foldersHeader, folder,
+                      spotifyHeader, spotifyLogin, spotifyUser, spotifyList };
 
     // Iconos dibujados (no dependen de las fuentes del sistema)
     void drawIcon (juce::Graphics& g, Kind kind, juce::Rectangle<float> r, juce::Colour c)
@@ -70,10 +71,35 @@ namespace
                 g.strokePath (handle, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
                 break;
             }
+            case Kind::spotifyHeader:
+            case Kind::spotifyLogin:
+            case Kind::spotifyUser:
+            {
+                // Círculo con tres ondas (sin logotipos de marca)
+                g.drawEllipse (cx - 7.5f, cy - 7.5f, 15.0f, 15.0f, 1.5f);
+                for (int i = 0; i < 3; ++i)
+                {
+                    juce::Path a;
+                    const float w = 9.0f - (float) i * 2.0f, y = cy - 3.0f + (float) i * 3.0f;
+                    a.startNewSubPath (cx - w * 0.5f, y);
+                    a.quadraticTo (cx, y - 1.8f, cx + w * 0.5f, y + 0.6f);
+                    g.strokePath (a, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                }
+                break;
+            }
+            case Kind::spotifyList:
+                for (int i = 0; i < 3; ++i)
+                {
+                    g.fillRect (cx - 7.0f, cy - 5.0f + i * 4.5f, 2.0f, 2.0f);
+                    g.fillRect (cx - 3.5f, cy - 5.0f + i * 4.5f, 10.5f, 2.0f);
+                }
+                break;
             case Kind::root:
                 break;
         }
     }
+
+    const juce::Colour spotifyGreen (0xff1ed760);
 }
 
 //==============================================================================
@@ -89,20 +115,27 @@ public:
 
     bool mightContainSubItems() override
     {
-        return kind == Kind::root || kind == Kind::playlistsHeader || kind == Kind::foldersHeader;
+        return kind == Kind::root || isHeader();
+    }
+
+    bool isHeader() const
+    {
+        return kind == Kind::playlistsHeader || kind == Kind::foldersHeader || kind == Kind::spotifyHeader;
     }
 
     bool canBeSelected() const override
     {
-        return kind != Kind::root && kind != Kind::playlistsHeader && kind != Kind::foldersHeader;
+        return kind != Kind::root && ! isHeader() && kind != Kind::spotifyLogin && kind != Kind::spotifyUser;
     }
 
     juce::String getUniqueName() const override
     {
-        return juce::String ((int) kind) + ":" + juce::String (playlistId) + ":" + folder.getFullPathName();
+        return juce::String ((int) kind) + ":" + juce::String (playlistId) + ":" + folder.getFullPathName() + ":" + externalId;
     }
 
-    int getItemHeight() const override      { return kind == Kind::playlistsHeader || kind == Kind::foldersHeader ? 30 : 25; }
+    int getItemHeight() const override      { return isHeader() ? 30 : 25; }
+
+    juce::String externalId;            // lista de Spotify
 
     LibraryView view() const
     {
@@ -113,15 +146,17 @@ public:
                : kind == Kind::folder   ? LibraryView::Type::folder
                : kind == Kind::automix  ? LibraryView::Type::automix
                : kind == Kind::wanted   ? LibraryView::Type::wanted
+               : kind == Kind::spotifyList ? LibraryView::Type::spotify
                                         : LibraryView::Type::all;
         v.playlistId = playlistId;
         v.folder = folder;
+        v.externalId = externalId;
         return v;
     }
 
     void paintItem (juce::Graphics& g, int width, int height) override
     {
-        const bool header = kind == Kind::playlistsHeader || kind == Kind::foldersHeader;
+        const bool header = isHeader();
 
         if (isSelected())
         {
@@ -138,6 +173,7 @@ public:
                               : kind == Kind::history  ? cue
                               : kind == Kind::automix  ? play
                               : kind == Kind::wanted   ? juce::Colour (0xffe8c33a)
+                              : kind == Kind::spotifyLogin || kind == Kind::spotifyUser || kind == Kind::spotifyList ? spotifyGreen
                                                        : textDim;
         drawIcon (g, kind, area.removeFromLeft (24).toFloat(), header ? textDim : iconColour);
 
@@ -148,7 +184,9 @@ public:
             g.drawText (juce::String (count), area.removeFromRight (44).withTrimmedRight (6), juce::Justification::centredRight);
         }
 
-        g.setColour (header ? textDim : (isSelected() ? juce::Colours::white : text));
+        g.setColour (header ? textDim : kind == Kind::spotifyLogin ? spotifyGreen
+                                      : kind == Kind::spotifyUser ? textDim
+                                      : (isSelected() ? juce::Colours::white : text));
         g.setFont (header ? juce::FontOptions (11.0f, juce::Font::bold) : juce::FontOptions (14.0f));
         g.drawText (header ? label.toUpperCase() : label, area.withTrimmedLeft (4), juce::Justification::centredLeft, true);
     }
@@ -163,6 +201,10 @@ public:
     {
         if (e.mods.isPopupMenu())
             showMenu();
+        else if (kind == Kind::spotifyLogin)
+        {
+            if (tree.onSpotifyLogin) tree.onSpotifyLogin();
+        }
         else if (! canBeSelected())
             setOpen (! isOpen());
     }
@@ -267,6 +309,37 @@ private:
                 m.addItem (juce::String::fromUTF8 ("Añadir carpeta..."), [this] { tree.askAddFolder(); });
                 break;
 
+            case Kind::spotifyHeader:
+            case Kind::spotifyLogin:
+            case Kind::spotifyUser:
+            case Kind::spotifyList:
+                if (! tree.spotifyConnected)
+                {
+                    m.addItem (juce::String::fromUTF8 ("Iniciar sesión con Spotify..."), [this] { if (tree.onSpotifyLogin) tree.onSpotifyLogin(); });
+                    break;
+                }
+                if (kind == Kind::spotifyList)
+                {
+                    ExternalPlaylist info;
+                    for (auto& l : tree.spotifyLists)
+                        if (l.id == externalId)
+                            info = l;
+                    m.addItem ("Copiar a mis listas de CesarDJ", [this, info] { if (tree.onSpotifyImport) tree.onSpotifyImport (info); });
+                    m.addSeparator();
+                }
+                m.addItem ("Actualizar listas", [this] { if (tree.onSpotifyRefresh) tree.onSpotifyRefresh(); });
+                m.addItem ("Importar varias listas...", [this] { if (tree.onSpotifyImportAll) tree.onSpotifyImportAll(); });
+                m.addSeparator();
+                m.addItem (juce::String::fromUTF8 ("Cerrar sesión de Spotify"), [this]
+                {
+                    juce::Component::SafePointer<LibraryTree> safe (&tree);
+                    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Spotify",
+                        juce::String::fromUTF8 ("¿Cerrar la sesión de ") + tree.spotifyUser + "?\n"
+                        + juce::String::fromUTF8 ("Tus listas ya copiadas a CesarDJ se conservan."), juce::String::fromUTF8 ("Cerrar sesión"), "Cancelar", nullptr,
+                        juce::ModalCallbackFunction::create ([safe] (int r) { if (r == 1 && safe != nullptr && safe->onSpotifyLogout) safe->onSpotifyLogout(); }));
+                });
+                break;
+
             case Kind::root:
                 break;
         }
@@ -324,6 +397,21 @@ void LibraryTree::refresh()
         folders->addSubItem (new LibraryTreeItem (*this, Kind::folder, f.getFileName().isEmpty() ? f.getFullPathName() : f.getFileName(), 0, f));
     newRoot->addSubItem (folders);
 
+    auto* spotify = new LibraryTreeItem (*this, Kind::spotifyHeader, "Spotify");
+    if (! spotifyConnected)
+        spotify->addSubItem (new LibraryTreeItem (*this, Kind::spotifyLogin, juce::String::fromUTF8 ("Iniciar sesión con Spotify")));
+    else
+    {
+        spotify->addSubItem (new LibraryTreeItem (*this, Kind::spotifyUser, spotifyUser.isNotEmpty() ? spotifyUser : juce::String ("Conectado")));
+        for (auto& l : spotifyLists)
+        {
+            auto* item = new LibraryTreeItem (*this, Kind::spotifyList, l.name, 0, {}, l.count);
+            item->externalId = l.id;
+            spotify->addSubItem (item);
+        }
+    }
+    newRoot->addSubItem (spotify);
+
     setRootItem (newRoot.get());
     root = std::move (newRoot);
 
@@ -331,6 +419,14 @@ void LibraryTree::refresh()
         restoreOpennessState (*state, true);
     else
         root->getSubItem (0)->setSelected (true, true, juce::dontSendNotification);
+}
+
+void LibraryTree::setSpotifyState (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>& lists)
+{
+    spotifyConnected = connected;
+    spotifyUser = user;
+    spotifyLists = lists;
+    refresh();
 }
 
 void LibraryTree::itemChosen (const LibraryView& view, const juce::String& title)

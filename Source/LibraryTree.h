@@ -18,6 +18,11 @@ public:
     std::function<void()> onImportFile, onImportSpotify;
     std::function<void (juce::int64 playlistId, const juce::String& name)> onExportPlaylist;
 
+    // Sección Spotify (sesión iniciada dentro de CesarDJ)
+    void setSpotifyState (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>& lists);
+    std::function<void()> onSpotifyLogin, onSpotifyLogout, onSpotifyRefresh, onSpotifyImportAll;
+    std::function<void (const ExternalPlaylist&)> onSpotifyImport;
+
     void askNewPlaylist (const juce::Array<juce::int64>& tracksToAdd = {});
     void askAddFolder();
 
@@ -33,6 +38,10 @@ private:
     std::unique_ptr<juce::AlertWindow> prompt;
     std::unique_ptr<juce::FileChooser> chooser;
     bool refreshing = false;
+
+    bool spotifyConnected = false;
+    juce::String spotifyUser;
+    std::vector<ExternalPlaylist> spotifyLists;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LibraryTree)
 };

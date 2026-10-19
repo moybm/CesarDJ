@@ -63,6 +63,24 @@ MainComponent::MainComponent()
     browser.onImportFile = [this] { importer.importFromFile(); };
     browser.onImportSpotify = [this] { importer.importFromSpotify(); };
     browser.onExportPlaylist = [this] (juce::int64 id, const juce::String& name) { importer.exportPlaylist (id, name); };
+
+    // Spotify dentro del navegador: sesión guardada, listas, me gusta y álbumes
+    auto& tree = browser.getTree();
+    tree.onSpotifyLogin     = [this] { importer.loginSpotify(); };
+    tree.onSpotifyLogout    = [this] { importer.logoutSpotify(); };
+    tree.onSpotifyRefresh   = [this] { importer.refreshSpotify(); };
+    tree.onSpotifyImportAll = [this] { importer.importAllSpotify(); };
+    tree.onSpotifyImport    = [this] (const ExternalPlaylist& p) { importer.importSpotifyPlaylist (p); };
+    browser.fetchSpotify = [this] (const juce::String& id, std::function<void (std::vector<LibraryTrack>)> done)
+    {
+        importer.fetchSpotifyTracks (id, std::move (done));
+    };
+    importer.onSpotifyState = [this] (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>& lists)
+    {
+        browser.setSpotifyState (connected, user, lists);
+    };
+    browser.setSpotifyState (importer.isSpotifyConnected(), importer.getSpotifyUser(), {});
+    importer.refreshSpotify();          // si hay sesión guardada, trae las listas al arrancar
     importer.onStatus = [this] (const juce::String& msg)
     {
         if (msg.isEmpty())

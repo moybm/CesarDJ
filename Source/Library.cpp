@@ -344,6 +344,8 @@ std::vector<LibraryTrack> Library::query (const LibraryView& view, const juce::S
 
     if (view.type == LibraryView::Type::wanted)
         return wantedTracks (search);
+    if (view.type == LibraryView::Type::spotify)
+        return result;                  // las rellena el navegador con lo que llega de Spotify
 
     juce::String sql, defaultOrder;
     juce::StringArray where;

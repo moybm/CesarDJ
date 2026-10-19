@@ -22,6 +22,13 @@ struct LibraryTrack
     std::array<double, 4> hotCues { -1.0, -1.0, -1.0, -1.0 };
 };
 
+// Lista de una plataforma externa (Spotify): id, nombre y número de canciones
+struct ExternalPlaylist
+{
+    juce::String id, name;
+    int count = 0;
+};
+
 struct LibraryPlaylist
 {
     juce::int64 id = 0;
@@ -32,14 +39,15 @@ struct LibraryPlaylist
 // Qué se está viendo en el navegador
 struct LibraryView
 {
-    enum class Type { all, recentlyAdded, history, playlist, folder, automix, wanted };
+    enum class Type { all, recentlyAdded, history, playlist, folder, automix, wanted, spotify };
     Type type = Type::all;
     juce::int64 playlistId = 0;
     juce::File folder;
+    juce::String externalId;            // lista de Spotify
 
     bool operator== (const LibraryView& o) const
     {
-        return type == o.type && playlistId == o.playlistId && folder == o.folder;
+        return type == o.type && playlistId == o.playlistId && folder == o.folder && externalId == o.externalId;
     }
 };
 

@@ -27,6 +27,11 @@ public:
     std::function<void()> onImportFile, onImportSpotify;                   // importar listas
     std::function<void (juce::int64, const juce::String&)> onExportPlaylist;
 
+    // Spotify: canciones de una lista ya emparejadas con la biblioteca (file vacío = falta)
+    std::function<void (const juce::String& id, std::function<void (std::vector<LibraryTrack>)>)> fetchSpotify;
+    void setSpotifyState (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>& lists);
+    LibraryTree& getTree()                      { return tree; }
+
     void markPlayedThisSession (const juce::File& file);
     void focusSearch()                          { searchBox.grabKeyboardFocus(); }
 
@@ -90,6 +95,12 @@ private:
     juce::Rectangle<int> titleArea, statusArea, infoArea, ratingArea;
     juce::String statusText;
     bool refreshPending = false;
+
+    std::map<juce::String, std::vector<LibraryTrack>> spotifyCache;
+    juce::String spotifyLoading;
+    juce::String emptyLibraryText;
+    std::vector<LibraryTrack> spotifyRows();
+    static bool isMissing (const LibraryTrack& t)   { return t.id <= 0; }
     juce::uint32 refreshDueTime = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrowserComponent)

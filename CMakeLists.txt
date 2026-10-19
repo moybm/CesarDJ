@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CesarDJ VERSION 0.9.0)
+project(CesarDJ VERSION 0.10.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -85,12 +85,27 @@ if (MSVC)
     target_compile_options(soundtouch PRIVATE /W0)
 endif()
 
+# WebView2 (Microsoft Edge): ventana de inicio de sesión de Spotify dentro de CesarDJ.
+# Se descarga el SDK de NuGet (verificado) y se enlaza estático: no añade DLLs al programa.
+set(WEBVIEW2_VERSION 1.0.3967.48)
+set(WEBVIEW2_DIR "${CMAKE_BINARY_DIR}/webview2/Microsoft.Web.WebView2.${WEBVIEW2_VERSION}")
+if (NOT EXISTS "${WEBVIEW2_DIR}/build/native/include/WebView2.h")
+    message(STATUS "Descargando el SDK de WebView2...")
+    file(DOWNLOAD
+        "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/${WEBVIEW2_VERSION}/microsoft.web.webview2.${WEBVIEW2_VERSION}.nupkg"
+        "${CMAKE_BINARY_DIR}/webview2.nupkg"
+        EXPECTED_HASH SHA256=c66357ac7f324ec9bcafe5241706a023b4122d8c22300c31de4b0eb220db689e)
+    file(ARCHIVE_EXTRACT INPUT "${CMAKE_BINARY_DIR}/webview2.nupkg" DESTINATION "${WEBVIEW2_DIR}")
+endif()
+set(JUCE_WEBVIEW2_PACKAGE_LOCATION "${CMAKE_BINARY_DIR}/webview2")
+
 juce_add_gui_app(CesarDJ
     PRODUCT_NAME "CesarDJ"
     COMPANY_NAME "CesarDJ"
     DESCRIPTION  "CesarDJ - software DJ"
     ICON_BIG     Resources/vespa.svg
-    ICON_SMALL   Resources/vespa.svg)
+    ICON_SMALL   Resources/vespa.svg
+    NEEDS_WEBVIEW2 TRUE)
 
 # Si cambia el logo, regenerar el icono del .exe (JUCE no lo detecta por sí solo)
 set(CESARDJ_ICON "${CMAKE_BINARY_DIR}/CesarDJ_artefacts/JuceLibraryCode/icon.ico")
@@ -130,7 +145,8 @@ target_sources(CesarDJ PRIVATE
     Source/PlaylistImport.cpp)
 
 target_compile_definitions(CesarDJ PRIVATE
-    JUCE_WEB_BROWSER=0
+    JUCE_WEB_BROWSER=1
+    JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
     JUCE_USE_CURL=0
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CesarDJ,JUCE_PRODUCT_NAME>"

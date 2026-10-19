@@ -2,6 +2,9 @@
 #include "TrackMatcher.h"
 #include "DJLookAndFeel.h"
 #include <juce_cryptography/juce_cryptography.h>
+#include <juce_gui_extra/juce_gui_extra.h>
+#include "SpotifyConfig.h"
+#include "Branding.h"
 
 using namespace DJColours;
 
@@ -228,7 +231,50 @@ bool PlaylistFiles::writeM3u (const juce::File& file, const std::vector<LibraryT
 //==============================================================================
 SpotifyClient::SpotifyClient (juce::PropertiesFile& s) : settings (s) {}
 
-juce::String SpotifyClient::getClientId() const         { return settings.getValue ("spotifyClientId"); }
+juce::String SpotifyClient::getClientId() const
+{
+    const juce::String builtIn (CESARDJ_SPOTIFY_CLIENT_ID);
+    return builtIn.isNotEmpty() ? builtIn : settings.getValue ("spotifyClientId");
+}
+
+juce::String SpotifyClient::getUserName() const         { return settings.getValue ("spotifyUser"); }
+
+juce::String SpotifyClient::makeAuthUrl (const juce::String& challenge, const juce::String& state, bool forceDialog) const
+{
+    return juce::String ("https://accounts.spotify.com/authorize?response_type=code")
+        + "&client_id=" + urlEncode (getClientId())
+        + "&redirect_uri=" + urlEncode (redirectUri)
+        + "&code_challenge_method=S256&code_challenge=" + challenge
+        + "&state=" + state
+        + (forceDialog ? "&show_dialog=true" : "")
+        + "&scope=" + urlEncode ("playlist-read-private playlist-read-collaborative user-library-read");
+}
+
+bool SpotifyClient::exchangeCode (const juce::String& code, const juce::String& verifier, juce::String& error)
+{
+    const auto json = postForm ("https://accounts.spotify.com/api/token",
+                                "grant_type=authorization_code&code=" + urlEncode (code)
+                                + "&redirect_uri=" + urlEncode (redirectUri)
+                                + "&client_id=" + urlEncode (getClientId())
+                                + "&code_verifier=" + verifier, error);
+    return error.isEmpty() && storeTokens (json, error);
+}
+
+bool SpotifyClient::fetchUserName (juce::String& error)
+{
+    if (! ensureToken (error))
+        return false;
+    int status = 0;
+    const auto me = request ("https://api.spotify.com/v1/me", error, status);
+    if (error.isNotEmpty())
+        return false;
+    auto name = me["display_name"].toString();
+    if (name.isEmpty())
+        name = me["id"].toString();
+    settings.setValue ("spotifyUser", name);
+    settings.saveIfNeeded();
+    return true;
+}
 void SpotifyClient::setClientId (const juce::String& id) { settings.setValue ("spotifyClientId", id.trim()); settings.saveIfNeeded(); }
 bool SpotifyClient::hasSession() const                  { return settings.getValue ("spotifyRefreshToken").isNotEmpty(); }
 
@@ -237,6 +283,7 @@ void SpotifyClient::logout()
     const juce::ScopedLock sl (lock);
     accessToken.clear();
     settings.removeValue ("spotifyRefreshToken");
+    settings.removeValue ("spotifyUser");
     settings.saveIfNeeded();
 }
 
@@ -380,9 +427,17 @@ bool SpotifyClient::ensureToken (juce::String& error)
     const auto json = postForm ("https://accounts.spotify.com/api/token",
                                 "grant_type=refresh_token&refresh_token=" + urlEncode (refresh)
                                 + "&client_id=" + urlEncode (getClientId()), error);
-    if (! error.isEmpty() || ! storeTokens (json, error))
+    if (! error.isEmpty())
+        return false;   // sin internet: la sesión se conserva
+
+    if (! storeTokens (json, error))
     {
-        logout();       // sesión caducada o revocada: habrá que volver a entrar
+        // Permiso caducado (los de Spotify duran hasta 180 días) o revocado: hay que volver a entrar
+        if (json["error"].toString() == "invalid_grant")
+        {
+            logout();
+            error = juce::String::fromUTF8 ("La sesión de Spotify ha caducado. Vuelve a iniciar sesión (SPOTIFY > Iniciar sesión).");
+        }
         return false;
     }
     return true;
@@ -411,8 +466,10 @@ juce::var SpotifyClient::request (const juce::String& url, juce::String& error, 
 
     const auto json = juce::JSON::parse (stream->readEntireStreamAsString());
     if (status == 403)
-        error = juce::String::fromUTF8 ("Spotify ha denegado el acceso (403). En el panel de tu app de Spotify, añade tu "
-                                        "cuenta en \"User Management\".");
+        error = juce::String::fromUTF8 ("Esta cuenta de Spotify no está autorizada en CesarDJ (403).\n\n"
+                                        "El administrador de CesarDJ debe añadirla en developer.spotify.com > CesarDJ > "
+                                        "User Management (nombre y correo de la cuenta).\n\n"
+                                        "Mientras tanto puedes importar tus listas con un archivo CSV (Importar > Desde un archivo).");
     else if (status >= 400)
         error = "Error de Spotify (" + juce::String (status) + "): " + json["error"]["message"].toString();
     return json;
@@ -447,6 +504,31 @@ std::vector<SpotifyClient::PlaylistInfo> SpotifyClient::listPlaylists (juce::Str
             }
         next = page["next"].toString();
     }
+
+    // Álbumes guardados
+    next = "https://api.spotify.com/v1/me/albums?limit=50";
+    while (next.isNotEmpty())
+    {
+        const auto page = request (next, error, status);
+        if (! error.isEmpty())
+        {
+            error.clear();      // sin álbumes no es un error grave
+            break;
+        }
+        if (auto* items = page["items"].getArray())
+            for (auto& item : *items)
+            {
+                const auto a = item["album"];
+                juce::StringArray artists;
+                if (auto* ar = a["artists"].getArray())
+                    for (auto& artist : *ar)
+                        artists.add (artist["name"].toString());
+                lists.push_back ({ albumPrefix + a["id"].toString(),
+                                   juce::String::fromUTF8 ("Álbum: ") + a["name"].toString() + " - " + artists.joinIntoString (", "),
+                                   (int) a["total_tracks"] });
+            }
+        next = page["next"].toString();
+    }
     return lists;
 }
 
@@ -459,8 +541,11 @@ std::optional<ImportedPlaylist> SpotifyClient::fetchPlaylist (const PlaylistInfo
     p.name = info.name;
     p.source = "Spotify";
 
+    const bool isAlbum = info.id.startsWith (albumPrefix);
+    const auto albumName = isAlbum ? info.name.fromFirstOccurrenceOf (": ", false, false).upToLastOccurrenceOf (" - ", false, false) : juce::String();
     juce::String next = info.id == likedId ? juce::String ("https://api.spotify.com/v1/me/tracks?limit=50")
-                                           : "https://api.spotify.com/v1/playlists/" + info.id + "/tracks?limit=100";
+                      : isAlbum ? "https://api.spotify.com/v1/albums/" + info.id.fromFirstOccurrenceOf (albumPrefix, false, false) + "/tracks?limit=50"
+                                : "https://api.spotify.com/v1/playlists/" + info.id + "/tracks?limit=100";
     while (next.isNotEmpty())
     {
         int status = 0;
@@ -471,7 +556,7 @@ std::optional<ImportedPlaylist> SpotifyClient::fetchPlaylist (const PlaylistInfo
         if (auto* items = page["items"].getArray())
             for (auto& item : *items)
             {
-                const auto t = item.hasProperty ("track") ? item["track"] : item["item"];
+                const auto t = isAlbum ? item : (item.hasProperty ("track") ? item["track"] : item["item"]);
                 if (t.isVoid() || t["type"].toString() == "episode")
                     continue;       // canciones borradas o podcasts
 
@@ -482,7 +567,7 @@ std::optional<ImportedPlaylist> SpotifyClient::fetchPlaylist (const PlaylistInfo
                     for (auto& artist : *a)
                         artists.add (artist["name"].toString());
                 track.artist = artists.joinIntoString (", ");
-                track.album = t["album"]["name"].toString();
+                track.album = isAlbum ? albumName : t["album"]["name"].toString();
                 track.duration = (double) t["duration_ms"] / 1000.0;
                 if (track.title.isNotEmpty())
                     p.tracks.push_back (track);
@@ -812,42 +897,12 @@ namespace
 
 void PlaylistImporter::importFromSpotify()
 {
-    if (spotify.getClientId().isEmpty())
-    {
-        showSpotifySetup();
-        return;
-    }
-
-    std::weak_ptr<bool> weak = alive;
-    status (spotify.hasSession() ? juce::String ("Spotify: leyendo tus listas...")
-                                 : juce::String::fromUTF8 ("Spotify: inicia sesión en la ventana del navegador..."));
-    cancel = false;
-
-    pool.addJob ([this, weak]
-    {
-        juce::String error;
-        if (! spotify.hasSession() && ! spotify.login ([this] { return cancel.load(); }, error))
-        {
-            juce::MessageManager::callAsync ([this, weak, error]
-            {
-                if (weak.expired()) return;
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
-                if (onStatus) onStatus ({});
-            });
-            return;
-        }
-
-        auto lists = spotify.listPlaylists (error);
-        juce::MessageManager::callAsync ([this, weak, lists, error]
-        {
-            if (weak.expired()) return;
-            if (onStatus) onStatus ({});
-            if (error.isNotEmpty())
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
-            else
-                showSpotifyChooser (lists);
-        });
-    });
+    if (! spotify.hasSession())
+        loginSpotify();
+    else if (! spotifyLists.empty())
+        showSpotifyChooser (spotifyLists);
+    else
+        refreshSpotify();
 }
 
 void PlaylistImporter::showSpotifySetup()
@@ -857,7 +912,7 @@ void PlaylistImporter::showSpotifySetup()
     {
         spotify.setClientId (id);
         spotify.logout();
-        juce::MessageManager::callAsync ([this] { importFromSpotify(); });
+        juce::MessageManager::callAsync ([this] { loginSpotify(); });
     };
     launch (panelComp, "Conectar CesarDJ con Spotify");
 }
@@ -892,4 +947,322 @@ void PlaylistImporter::showSpotifyChooser (std::vector<SpotifyClient::PlaylistIn
         });
     };
     launch (panelComp, "Listas de Spotify");
+}
+
+//==============================================================================
+// Spotify integrado: inicio de sesión dentro de CesarDJ (WebView2), sesión guardada
+//==============================================================================
+namespace
+{
+    juce::File webViewDataFolder()
+    {
+        return juce::File::getSpecialLocation (juce::File::windowsLocalAppData).getChildFile ("CesarDJ").getChildFile ("WebView2");
+    }
+
+    juce::WebBrowserComponent::Options loginBrowserOptions()
+    {
+        return juce::WebBrowserComponent::Options()
+            .withBackend (juce::WebBrowserComponent::Options::Backend::webview2)
+            .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2().withUserDataFolder (webViewDataFolder()));
+    }
+
+    // Página oficial de Spotify; cuando Spotify vuelve a la dirección de retorno, se intercepta (no se carga)
+    class SpotifyLoginBrowser : public juce::WebBrowserComponent
+    {
+    public:
+        SpotifyLoginBrowser (std::function<void (const juce::String&)> onRedirect)
+            : juce::WebBrowserComponent (loginBrowserOptions()), redirect (std::move (onRedirect)) {}
+
+        bool pageAboutToLoad (const juce::String& url) override
+        {
+            if (! url.startsWith (SpotifyClient::redirectUri))
+                return true;
+
+            if (! handled && redirect != nullptr)
+            {
+                handled = true;
+                auto r = redirect;
+                juce::MessageManager::callAsync ([r, url] { r (url); });
+            }
+            return false;
+        }
+
+        void newWindowAttemptingToLoad (const juce::String& url) override   { goToURL (url); }
+
+    private:
+        std::function<void (const juce::String&)> redirect;
+        bool handled = false;
+    };
+
+    class SpotifyLoginWindow : public juce::DocumentWindow
+    {
+    public:
+        SpotifyLoginWindow (const juce::String& url, std::function<void (const juce::String&)> onRedirect, std::function<void()> onClose)
+            : juce::DocumentWindow (juce::String::fromUTF8 ("Iniciar sesión en Spotify"), panel, juce::DocumentWindow::closeButton),
+              closed (std::move (onClose))
+        {
+            auto* browser = new SpotifyLoginBrowser (std::move (onRedirect));
+            browser->setSize (500, 760);
+            setContentOwned (browser, true);
+            setUsingNativeTitleBar (true);
+            setResizable (true, false);
+            centreWithSize (500, 760);
+            setVisible (true);
+            toFront (true);
+            browser->goToURL (url);
+        }
+
+        void closeButtonPressed() override      { if (closed != nullptr) closed(); }
+
+    private:
+        std::function<void()> closed;
+    };
+
+    void makePkce (juce::String& verifier, juce::String& challenge)
+    {
+        verifier = randomToken (64);
+        const juce::SHA256 hash (verifier.toRawUTF8(), (size_t) verifier.getNumBytesAsUTF8());
+        const auto digest = hash.getRawData();
+        challenge = base64Url (digest.getData(), digest.getSize());
+    }
+}
+
+void PlaylistImporter::loginSpotify()
+{
+    if (spotify.getClientId().isEmpty())
+    {
+        showSpotifySetup();
+        return;
+    }
+    startLogin();
+}
+
+void PlaylistImporter::startLogin()
+{
+    if (loginWindow != nullptr)
+    {
+        loginWindow->toFront (true);
+        return;
+    }
+
+    // Sin WebView2 (raro en Windows 10/11): se usa el navegador del sistema
+    if (! juce::WebBrowserComponent::areOptionsSupported (loginBrowserOptions()))
+    {
+        std::weak_ptr<bool> weak = alive;
+        status (juce::String::fromUTF8 ("Spotify: inicia sesión en la ventana del navegador..."));
+        cancel = false;
+        pool.addJob ([this, weak]
+        {
+            juce::String error;
+            const bool ok = spotify.login ([this] { return cancel.load(); }, error) && spotify.fetchUserName (error);
+            if (ok)
+                spotifyLists = spotify.listPlaylists (error);
+            juce::MessageManager::callAsync ([this, weak, ok, error]
+            {
+                if (weak.expired()) return;
+                if (! ok || error.isNotEmpty())
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
+                if (onStatus) onStatus ({});
+                publishSpotifyState();
+            });
+        });
+        return;
+    }
+
+    juce::String challenge;
+    makePkce (pendingVerifier, challenge);
+    pendingState = randomToken (16);
+    const auto url = spotify.makeAuthUrl (challenge, pendingState, true);
+
+    std::weak_ptr<bool> weak = alive;
+    loginWindow = std::make_unique<SpotifyLoginWindow> (url,
+        [this, weak] (const juce::String& redirectUrl)
+        {
+            if (weak.expired()) return;
+            const juce::URL u (redirectUrl);
+            const auto names = u.getParameterNames();
+            const auto values = u.getParameterValues();
+            const auto code = values[names.indexOf ("code")];
+            const bool stateOk = values[names.indexOf ("state")] == pendingState;
+
+            juce::MessageManager::callAsync ([this, weak] { if (! weak.expired()) loginWindow = nullptr; });
+
+            if (code.isNotEmpty() && stateOk)
+                finishLogin (code);
+            else
+                status (juce::String::fromUTF8 ("Spotify: inicio de sesión cancelado"));
+        },
+        [this, weak]
+        {
+            juce::MessageManager::callAsync ([this, weak] { if (! weak.expired()) loginWindow = nullptr; });
+        });
+}
+
+void PlaylistImporter::finishLogin (const juce::String& code)
+{
+    std::weak_ptr<bool> weak = alive;
+    status ("Spotify: conectando...");
+    const auto verifier = pendingVerifier;
+
+    pool.addJob ([this, weak, code, verifier]
+    {
+        juce::String error;
+        const bool ok = spotify.exchangeCode (code, verifier, error) && spotify.fetchUserName (error);
+        auto lists = ok ? spotify.listPlaylists (error) : std::vector<ExternalPlaylist>();
+
+        juce::MessageManager::callAsync ([this, weak, ok, error, lists]
+        {
+            if (weak.expired()) return;
+            if (! ok || error.isNotEmpty())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
+                if (onStatus) onStatus ({});
+            }
+            else
+            {
+                spotifyLists = lists;
+                status ("Spotify: conectado como " + spotify.getUserName());
+            }
+            publishSpotifyState();
+        });
+    });
+}
+
+void PlaylistImporter::logoutSpotify()
+{
+    spotify.logout();
+    spotifyLists.clear();
+
+    // Se borran también las cookies de la ventana de Spotify: la próxima vez se puede entrar con otra cuenta
+    if (loginWindow == nullptr)
+        webViewDataFolder().deleteRecursively();
+
+    status (juce::String::fromUTF8 ("Sesión de Spotify cerrada"));
+    publishSpotifyState();
+}
+
+void PlaylistImporter::refreshSpotify()
+{
+    if (! spotify.hasSession())
+    {
+        publishSpotifyState();
+        return;
+    }
+
+    std::weak_ptr<bool> weak = alive;
+    pool.addJob ([this, weak]
+    {
+        juce::String error;
+        auto lists = spotify.listPlaylists (error);
+        juce::MessageManager::callAsync ([this, weak, lists, error]
+        {
+            if (weak.expired()) return;
+            if (error.isNotEmpty())
+                status ("Spotify: " + error.upToFirstOccurrenceOf ("\n", false, false));
+            else
+                spotifyLists = lists;
+            publishSpotifyState();
+        });
+    });
+}
+
+void PlaylistImporter::publishSpotifyState()
+{
+    if (onSpotifyState != nullptr)
+        onSpotifyState (spotify.hasSession(), spotify.getUserName(), spotifyLists);
+}
+
+const ExternalPlaylist* PlaylistImporter::findSpotifyList (const juce::String& id) const
+{
+    for (auto& l : spotifyLists)
+        if (l.id == id)
+            return &l;
+    return nullptr;
+}
+
+void PlaylistImporter::importSpotifyPlaylist (const ExternalPlaylist& info)
+{
+    std::weak_ptr<bool> weak = alive;
+    status ("Spotify: importando " + info.name + "...");
+    pool.addJob ([this, weak, info]
+    {
+        juce::String error;
+        const auto p = spotify.fetchPlaylist (info, error);
+        status ({});
+        juce::MessageManager::callAsync ([this, weak, p, error]
+        {
+            if (weak.expired()) return;
+            if (! p.has_value())
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
+        });
+        if (p.has_value())
+        {
+            const auto r = importPlaylist (*p);
+            juce::MessageManager::callAsync ([this, weak, r] { if (! weak.expired()) report (r); });
+        }
+    });
+}
+
+void PlaylistImporter::importAllSpotify()
+{
+    if (! spotifyLists.empty())
+        showSpotifyChooser (spotifyLists);
+}
+
+// Canciones de una lista de Spotify emparejadas con la biblioteca, para verlas en el navegador
+void PlaylistImporter::fetchSpotifyTracks (const juce::String& id, std::function<void (std::vector<LibraryTrack>)> onDone)
+{
+    const auto* info = findSpotifyList (id);
+    if (info == nullptr)
+    {
+        juce::MessageManager::callAsync ([onDone] { onDone ({}); });
+        return;
+    }
+
+    std::weak_ptr<bool> weak = alive;
+    const auto copy = *info;
+    pool.addJob ([this, weak, copy, onDone]
+    {
+        juce::String error;
+        const auto p = spotify.fetchPlaylist (copy, error);
+        std::vector<LibraryTrack> rows;
+
+        if (p.has_value())
+        {
+            const auto lib = library.allTracks();
+            std::vector<TrackMatcher::Key> keys;
+            keys.reserve (lib.size());
+            for (auto& t : lib)
+                keys.push_back (TrackMatcher::makeKey (t.title, t.artist, t.duration));
+
+            for (auto& t : p->tracks)
+            {
+                const auto want = TrackMatcher::makeKey (t.title, t.artist, t.duration);
+                double best = 0.0;
+                size_t bestIndex = 0;
+                for (size_t k = 0; k < keys.size(); ++k)
+                {
+                    const double s = TrackMatcher::score (want, keys[k]);
+                    if (s > best) { best = s; bestIndex = k; }
+                }
+
+                LibraryTrack row;
+                if (best >= TrackMatcher::matchThreshold)
+                    row = lib[bestIndex];           // archivo, BPM, tono... de tu biblioteca
+                row.title = t.title;
+                row.artist = t.artist;
+                row.album = t.album;
+                row.duration = t.duration;
+                rows.push_back (row);
+            }
+        }
+
+        juce::MessageManager::callAsync ([weak, rows, onDone, error]
+        {
+            if (weak.expired()) return;
+            if (error.isNotEmpty())
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
+            onDone (rows);
+        });
+    });
 }
