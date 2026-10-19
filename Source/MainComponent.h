@@ -15,6 +15,7 @@
 #include "Automix.h"
 #include "StemSeparator.h"
 #include "PlaylistImport.h"
+#include "SettingsWindow.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -40,14 +41,13 @@ public:
 
 private:
     void timerCallback() override;
-    void showAudioSettings();
+    void showSettings (SettingsWindow::Tab tab);
     void loadFromBrowser (const juce::File& file, int deckIndex);
     void connectDeck (int index, DeckEngine& deck, DeckComponent& view);
     DeckEngine::TrackInfo infoFor (const juce::File& file);
 
     void toggleRecording();
     void showAutomixMenu();
-    void showMidiMenu();
     void setLearning (bool shouldLearn);
     void learnClick (const juce::MouseEvent& e);
     void showStatus (const juce::String& message);
@@ -84,9 +84,10 @@ private:
     PlaylistImporter importer { library, settings };
 
     juce::Slider masterVolume { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::TextButton audioButton { "AUDIO" }, midiButton { "MIDI" }, recButton { "REC" }, automixButton { "AUTOMIX" };
+    juce::TextButton audioButton { "CONFIG" }, midiButton { "MIDI" }, recButton { "REC" }, automixButton { "AUTOMIX" };
     AutomixController automix { library, { &deckA, &deckB }, { &deckViewA, &deckViewB }, mixerView };
     std::unique_ptr<MidiController> midi;
+    std::unique_ptr<SettingsWindow> settingsWindow;
     ClickListener learnListener;
     juce::String statusMessage;
     juce::uint32 statusMessageUntil = 0;

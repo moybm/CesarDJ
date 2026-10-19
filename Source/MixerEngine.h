@@ -31,7 +31,8 @@ struct ChannelParams
 };
 
 // Mezclador de 2 canales: trim -> EQ -> fader -> crossfader -> master -> limitador
-// Salidas 1-2: master. Salidas 3-4 (si la tarjeta las tiene): auriculares con los canales en PFL.
+// Salidas configurables (Configuración > Audio): master y auriculares a cualquier par de salidas de la
+// tarjeta, o "divisor" (master mono a la izquierda y auriculares mono a la derecha, con un cable en Y).
 class MixerEngine : public juce::AudioSource
 {
 public:
@@ -43,7 +44,22 @@ public:
     std::atomic<float> crossfader { 0.5f };     // 0 = solo A, 1 = solo B
     std::atomic<float> masterVolume { 1.0f };   // 0..1
     std::atomic<float> masterPeakLeft { 0.0f }, masterPeakRight { 0.0f };
-    std::atomic<int> outputChannelCount { 2 };   // 4 = hay salida de auriculares
+    std::atomic<int> outputChannelCount { 2 };   // salidas abiertas en la tarjeta
+
+    // Enrutado (índice de la primera salida del par: 0 = salidas 1-2, 2 = salidas 3-4...)
+    std::atomic<int> masterOut { 0 };
+    std::atomic<int> phonesOut { 2 };            // -1 = sin auriculares
+    std::atomic<bool> splitMono { false };       // divisor: izquierda = master, derecha = auriculares
+    std::atomic<float> phonesVolume { 1.0f };    // 0..1
+    std::atomic<float> cueMix { 0.0f };          // 0 = solo pre-escucha, 1 = solo master
+    std::atomic<int> testTone { 0 };             // 1 = pitido por el master, 2 = por los auriculares
+
+    bool hasPhonesOutput() const
+    {
+        const int n = outputChannelCount.load();
+        return splitMono.load() ? n >= masterOut.load() + 2
+                                : phonesOut.load() >= 0 && n >= phonesOut.load() + 2;
+    }
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;
     void releaseResources() override;
@@ -63,7 +79,10 @@ private:
     SamplerEngine& sampler;
     Recorder& recorder;
     juce::SmoothedValue<float> masterGain { 1.0f };
-    juce::AudioBuffer<float> cueBuffer;
+    juce::AudioBuffer<float> cueBuffer, masterBuffer;
+    juce::SmoothedValue<float> phonesGain { 1.0f };
+    int toneTarget = 0, toneRemaining = 0;
+    double tonePhase = 0.0, sampleRateHz = 44100.0;
     juce::dsp::Limiter<float> limiter;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerEngine)

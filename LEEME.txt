@@ -24,8 +24,14 @@ TUS DATOS
   Desinstalar NO borra estos datos.
 
 PRIMEROS PASOS
-  1. AUDIO (arriba a la derecha): elige tu tarjeta de sonido.
-     Con 4 salidas, la 3-4 son los auriculares (boton de cascos del mezclador).
+  1. CONFIG (arriba a la derecha) > Audio: elige tu tarjeta de sonido o tu
+     controladora. "Configuracion rapida" lo deja listo con un clic:
+       * Altavoces del PC
+       * Controladora o tarjeta con auriculares (1-2 master, 3-4 cascos)
+       * PC + auriculares con cable divisor en Y (izquierda master,
+         derecha auriculares, en mono)
+     Puedes mandar master y auriculares a cualquier par de salidas, ajustar
+     volumen y mezcla CUE/MASTER de los cascos y probar cada salida.
   2. "+ Carpeta" (abajo a la izquierda): anade tu carpeta de musica.
   3. "Analizar BPM": calcula BPM, beatgrid y tonalidad de todas las canciones.
   4. Arrastra canciones a los decks, o doble clic para cargar en el deck libre.
@@ -59,9 +65,14 @@ TRUCOS
     y cargan al instante. Clic derecho en canciones > "Preparar stems con
     IA" para dejarlas listas por adelantado (por ejemplo, de noche).
   - IMPORTAR LISTAS (boton "Importar", abajo a la izquierda):
-      * Desde tu cuenta de Spotify: la primera vez el asistente te explica
-        como crear tu "app" gratuita de Spotify (Client ID). Inicias sesion
-        en la web de Spotify; CesarDJ solo lee titulos y artistas.
+      * SPOTIFY (en el arbol de la izquierda): "Iniciar sesion con Spotify"
+        abre la pagina oficial de Spotify dentro de CesarDJ. La sesion queda
+        guardada (hasta 180 dias; despues pide entrar otra vez). Veras tus
+        listas, "Canciones que me gustan" y tus albumes. Punto verde = la
+        tienes en tu biblioteca y se puede pinchar; "falta" = doble clic
+        para buscarla. Clic derecho: copiar a tus listas, actualizar o
+        cerrar sesion. La cuenta debe estar autorizada por el administrador
+        de CesarDJ (Spotify > User Management).
       * Desde un CSV (Spotify via exportify.app; Apple Music, Deezer, TIDAL,
         YouTube Music... via tunemymusic.com) o un M3U/M3U8 de otro programa.
     CesarDJ busca cada cancion en tu biblioteca y crea la lista. Las que
@@ -71,8 +82,13 @@ TRUCOS
     (no lo permiten): la musica tiene que estar en tu equipo.
   - Clic derecho en una lista > "Exportar a M3U" para llevarla a otro programa.
   - REC graba la sesion en WAV de 24 bits.
-  - MIDI: conecta tu controladora, pulsa Ctrl+M, haz clic en un control de
-    la pantalla y muevelo en la controladora.
+  - CONTROLADORAS (boton MIDI o CONFIG > Controladoras): conecta la
+    controladora por USB y aparece sola (la luz parpadea al tocarla).
+    Se puede desactivar con la casilla. Para asignar: "Aprender" (o Ctrl+M),
+    clic en un control de la pantalla y muevelo en la controladora. Los
+    platos funcionan con cualquier marca. "Guardar perfil" guarda las
+    asignaciones en %APPDATA%\CesarDJ\Controladoras: la proxima vez (o en
+    otro PC, copiando el archivo) se cargan solas al conectarla.
   - Clic en el logo de arriba a la izquierda: version y carpeta de datos.
 
 Hecho con JUCE, SoundTouch (LGPL), SQLite y demucs.cpp (Demucs v4, MIT).

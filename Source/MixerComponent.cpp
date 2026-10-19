@@ -140,11 +140,11 @@ void MixerComponent::setStemMode (bool shouldUseStems)
 
 void MixerComponent::timerCallback()
 {
-    // Los auriculares solo funcionan con una salida de 4 canales (1-2 master, 3-4 cascos)
-    const bool hasCue = mixer.outputChannelCount.load() >= 4;
+    // Los auriculares necesitan una salida configurada (Configuración > Audio)
+    const bool hasCue = mixer.hasPhonesOutput();
     for (auto& s : strips)
-        s.headphones.setTooltip (hasCue ? juce::String ("Pre-escucha por auriculares (salidas 3-4)")
-                                        : juce::String ("Para usar auriculares elige en Audio... una tarjeta con 4 salidas"));
+        s.headphones.setTooltip (hasCue ? juce::String (juce::String::fromUTF8 ("Pre-escucha por auriculares"))
+                                        : juce::String (juce::String::fromUTF8 ("Para usar auriculares: CONFIG > Audio > Auriculares")));
 
     if (stemMode)
         repaint (titleArea);

@@ -95,6 +95,9 @@ void MixerEngine::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
     masterGain.reset (sampleRate, smoothingSeconds);
     sampler.prepare (sampleRate);
     cueBuffer.setSize (2, maxBlock);
+    masterBuffer.setSize (2, maxBlock);
+    phonesGain.reset (sampleRate, smoothingSeconds);
+    sampleRateHz = sampleRate;
 
     limiter.prepare ({ sampleRate, (juce::uint32) maxBlock, 2 });
     limiter.setThreshold (-0.3f);
@@ -113,11 +116,20 @@ void MixerEngine::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferT
     auto& out = *bufferToFill.buffer;
     const int start = bufferToFill.startSample;
     const int n = bufferToFill.numSamples;
-    const int outChannels = juce::jmin (2, out.getNumChannels());
-    const bool hasCueOutput = out.getNumChannels() >= 4;
-    outputChannelCount = out.getNumChannels();
+    const int numOut = out.getNumChannels();
+    outputChannelCount = numOut;
 
     bufferToFill.clearActiveBufferRegion();
+    if (numOut == 0)
+        return;
+
+    const bool split = splitMono.load();
+    const int masterFirst = juce::jlimit (0, juce::jmax (0, numOut - 1), masterOut.load());
+    const int phonesFirst = phonesOut.load();
+    const bool hasCueOutput = hasPhonesOutput();
+
+    masterBuffer.setSize (2, n, false, false, true);
+    masterBuffer.clear();
     cueBuffer.setSize (2, n, false, false, true);
     cueBuffer.clear();
     bool anyPfl = false;
@@ -156,48 +168,93 @@ void MixerEngine::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferT
         c.outGain.setTargetValue (vol * vol * xfade[idx]);
         c.outGain.applyGain (c.buffer, n);
 
-        for (int ch = 0; ch < outChannels; ++ch)
-            out.addFrom (ch, start, c.buffer, ch, 0, n);
+        for (int ch = 0; ch < 2; ++ch)
+            masterBuffer.addFrom (ch, 0, c.buffer, ch, 0, n);
     }
 
     // El sampler va directo al master (después del crossfader)
-    sampler.addTo (out, start, n);
+    sampler.addTo (masterBuffer, 0, n);
 
     const float mv = masterVolume.load();
     masterGain.setTargetValue (mv * mv);
-    for (int i = 0; i < n; ++i)
+    masterGain.applyGain (masterBuffer, n);
+
+    // Pitido de prueba (Configuración > Audio): 440 Hz durante 1,5 s por la salida elegida
+    if (const int req = testTone.exchange (0); req != 0)
     {
-        const float g = masterGain.getNextValue();
-        for (int ch = 0; ch < outChannels; ++ch)
-            out.getWritePointer (ch, start)[i] *= g;
+        toneTarget = req;
+        toneRemaining = (int) (sampleRateHz * 1.5);
+    }
+    if (toneRemaining > 0 && toneTarget == 1)
+    {
+        for (int i = 0; i < n && toneRemaining > 0; ++i, --toneRemaining)
+        {
+            const float s = 0.25f * (float) std::sin (tonePhase);
+            tonePhase += juce::MathConstants<double>::twoPi * 440.0 / sampleRateHz;
+            masterBuffer.addSample (0, i, s);
+            masterBuffer.addSample (1, i, s);
+        }
     }
 
     // Limitador final: evita que la salida sature
-    if (outChannels == 2)
     {
-        juce::dsp::AudioBlock<float> block (out.getArrayOfWritePointers(), 2, (size_t) start, (size_t) n);
+        juce::dsp::AudioBlock<float> block (masterBuffer.getArrayOfWritePointers(), 2, 0, (size_t) n);
         limiter.process (juce::dsp::ProcessContextReplacing<float> (block));
     }
 
     // Grabación del master (después del limitador: exactamente lo que suena)
-    if (outChannels == 2)
     {
-        const float* rec[] = { out.getReadPointer (0, start), out.getReadPointer (1, start) };
+        const float* rec[] = { masterBuffer.getReadPointer (0), masterBuffer.getReadPointer (1) };
         recorder.write (rec, n);
     }
 
-    // Auriculares: los canales en PFL, o el master si no hay ninguno
+    // Auriculares: los canales en PFL mezclados con el master (CUE/MIX), o el master si no hay ninguno
     if (hasCueOutput)
     {
+        const float mix = anyPfl ? juce::jlimit (0.0f, 1.0f, cueMix.load()) : 1.0f;
         for (int ch = 0; ch < 2; ++ch)
         {
-            if (anyPfl)
-                out.copyFrom (2 + ch, start, cueBuffer, ch, 0, n);
-            else
-                out.copyFrom (2 + ch, start, out, juce::jmin (ch, outChannels - 1), start, n);
+            cueBuffer.applyGain (ch, 0, n, 1.0f - mix);
+            cueBuffer.addFrom (ch, 0, masterBuffer, ch, 0, n, mix);
         }
+
+        if (toneRemaining > 0 && toneTarget == 2)
+        {
+            for (int i = 0; i < n && toneRemaining > 0; ++i, --toneRemaining)
+            {
+                const float s = 0.25f * (float) std::sin (tonePhase);
+                tonePhase += juce::MathConstants<double>::twoPi * 440.0 / sampleRateHz;
+                cueBuffer.addSample (0, i, s);
+                cueBuffer.addSample (1, i, s);
+            }
+        }
+
+        const float pv = phonesVolume.load();
+        phonesGain.setTargetValue (pv * pv);
+        phonesGain.applyGain (cueBuffer, n);
+    }
+    if (toneRemaining > 0 && toneTarget == 2 && ! hasCueOutput)
+        toneRemaining = 0;
+
+    // Salida a la tarjeta
+    if (split && numOut >= masterFirst + 2)
+    {
+        // Divisor: izquierda = master en mono, derecha = auriculares en mono
+        out.addFrom (masterFirst, start, masterBuffer, 0, 0, n, 0.5f);
+        out.addFrom (masterFirst, start, masterBuffer, 1, 0, n, 0.5f);
+        out.addFrom (masterFirst + 1, start, cueBuffer, 0, 0, n, 0.5f);
+        out.addFrom (masterFirst + 1, start, cueBuffer, 1, 0, n, 0.5f);
+    }
+    else
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            out.addFrom (juce::jmin (masterFirst + ch, numOut - 1), start, masterBuffer, ch, 0, n);
+
+        if (hasCueOutput)
+            for (int ch = 0; ch < 2; ++ch)
+                out.addFrom (phonesFirst + ch, start, cueBuffer, ch, 0, n);
     }
 
-    storePeak (masterPeakLeft, out.getMagnitude (0, start, n));
-    storePeak (masterPeakRight, out.getMagnitude (outChannels - 1, start, n));
+    storePeak (masterPeakLeft, masterBuffer.getMagnitude (0, 0, n));
+    storePeak (masterPeakRight, masterBuffer.getMagnitude (1, 0, n));
 }

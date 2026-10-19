@@ -113,14 +113,14 @@ MainComponent::MainComponent()
     addAndMakeVisible (masterVolume);
 
     audioButton.setWantsKeyboardFocus (false);
-    audioButton.onClick = [this] { showAudioSettings(); };
-    audioButton.setTooltip ("Tarjeta de sonido, latencia y salidas (3-4 = auriculares)");
+    audioButton.onClick = [this] { showSettings (SettingsWindow::audioTab); };
+    audioButton.setTooltip (juce::String::fromUTF8 ("Configuración: tarjeta de sonido, salidas master/auriculares y controladoras"));
     addAndMakeVisible (audioButton);
 
     midiButton.setWantsKeyboardFocus (false);
     midiButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffb05cf0).darker (0.3f));
-    midiButton.onClick = [this] { showMidiMenu(); };
-    midiButton.setTooltip ("Controladoras MIDI y modo aprendizaje (MIDI learn)");
+    midiButton.onClick = [this] { showSettings (SettingsWindow::controllersTab); };
+    midiButton.setTooltip ("Controladoras MIDI: conectadas, MIDI learn (Ctrl+M) y perfiles");
     addAndMakeVisible (midiButton);
 
     recButton.setWantsKeyboardFocus (false);
@@ -155,9 +155,11 @@ MainComponent::MainComponent()
     auto screen = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
     setSize (juce::jmax (1280, screen.getWidth() * 92 / 100), juce::jmax (760, screen.getHeight() * 90 / 100));
 
-    // Audio: 4 salidas si la tarjeta las tiene (1-2 master, 3-4 auriculares); recuerda la última configuración
+    // Audio: hasta 8 salidas (master y auriculares a cualquier par, CONFIG > Audio); recuerda la última configuración
+    AudioRouting::load (mixer, settings);
     auto savedAudio = settings.getXmlValue ("audioDevice");
-    setAudioChannels (0, 4, savedAudio.get());
+    setAudioChannels (0, 8, savedAudio.get());
+    AudioRouting::applyChannels (deviceManager, mixer);
 
     midi = std::make_unique<MidiController> (deviceManager, settings, *this);
     midi->onLearned = [this] (const juce::String& id, const juce::String& desc)
@@ -165,6 +167,7 @@ MainComponent::MainComponent()
         showStatus (juce::String::fromUTF8 ("Asignado: ") + id + "  <-  " + desc);
         repaint();
     };
+    midi->onStatus = [this] (const juce::String& msg) { showStatus (msg); };
 
     startTimerHz (10);
 }
@@ -174,6 +177,7 @@ MainComponent::~MainComponent()
     automix.setEnabled (false);
     settings.setValue ("automixBeats", automix.getTransitionBeats());
     setLearning (false);
+    settingsWindow = nullptr;
     midi = nullptr;
     recorder.stop();
 
@@ -421,37 +425,6 @@ void MainComponent::toggleRecording()
 }
 
 //==============================================================================
-void MainComponent::showMidiMenu()
-{
-    juce::PopupMenu m;
-    const bool learning = midi->isLearning();
-    m.addItem ("Modo aprendizaje (MIDI learn)", true, learning, [this, learning] { setLearning (! learning); });
-    m.addSeparator();
-
-    m.addSectionHeader ("Controladoras conectadas");
-    const auto names = midi->getDeviceNames();
-    if (names.isEmpty())
-        m.addItem ("(ninguna)", false, false, nullptr);
-    for (auto& n : names)
-        m.addItem (n, false, false, nullptr);
-
-    m.addSeparator();
-    if (auto* target = midi->getLearnTarget())
-    {
-        const auto id = target->getComponentID();
-        m.addItem (juce::String::fromUTF8 ("Borrar la asignación de ") + id, midi->isMapped (id), false,
-                   [this, id] { midi->clearMappingsFor (id); repaint(); });
-    }
-    m.addItem ("Borrar todas las asignaciones (" + juce::String (midi->getNumMappings()) + ")", midi->getNumMappings() > 0, false, [this]
-    {
-        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Borrar asignaciones MIDI",
-            juce::String::fromUTF8 ("Se borrarán todas las asignaciones de la controladora."), "Borrar", "Cancelar", nullptr,
-            juce::ModalCallbackFunction::create ([this] (int r) { if (r == 1) { midi->clearMappings(); repaint(); } }));
-    });
-
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (midiButton));
-}
-
 void MainComponent::setLearning (bool shouldLearn)
 {
     if (midi == nullptr || midi->isLearning() == shouldLearn)
@@ -574,19 +547,25 @@ void MainComponent::restoreSamplerSettings()
         }
 }
 
-void MainComponent::showAudioSettings()
+void MainComponent::showSettings (SettingsWindow::Tab tab)
 {
-    auto* selector = new juce::AudioDeviceSelectorComponent (deviceManager, 0, 0, 2, 4, false, false, true, false);
-    selector->setSize (560, 460);
-
-    juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (selector);
-    options.dialogTitle = juce::String::fromUTF8 ("Configuración de audio");
-    options.dialogBackgroundColour = panel;
-    options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    options.launchAsync();
+    if (settingsWindow == nullptr)
+    {
+        settingsWindow = std::make_unique<SettingsWindow> (deviceManager, mixer, *midi, settings,
+                                                           [this] (bool on) { setLearning (on); },
+                                                           [this] { return midi != nullptr && midi->isLearning(); });
+        juce::Component::SafePointer<MainComponent> safe (this);
+        settingsWindow->onClose = [safe]
+        {
+            // No se puede borrar la ventana dentro de su propio botón de cerrar
+            juce::MessageManager::callAsync ([safe]
+            {
+                if (safe != nullptr)
+                    safe->settingsWindow = nullptr;
+            });
+        };
+    }
+    settingsWindow->showTab (tab);
 }
 
 void MainComponent::paint (juce::Graphics& g)
