@@ -23,6 +23,13 @@ TUS DATOS
   Las grabaciones se guardan en  Musica\CesarDJ Grabaciones.
   Desinstalar NO borra estos datos.
 
+MANUAL
+  Dentro de CesarDJ: boton AYUDA (arriba a la derecha) o tecla F1. Incluye
+  todo con detalle: audio, controladoras, Spotify (condiciones y por que no
+  se pueden pinchar sus canciones), limitaciones y solucion de problemas.
+  Los avisos importantes tienen la casilla "No volver a mostrar"; para que
+  vuelvan a salir: AYUDA > "Volver a mostrar los avisos".
+
 PRIMEROS PASOS
   1. CONFIG (arriba a la derecha) > Audio: elige tu tarjeta de sonido o tu
      controladora. "Configuracion rapida" lo deja listo con un clic:
@@ -40,6 +47,7 @@ ATAJOS DE TECLADO
   Deck A:  Q = CUE   W = PLAY/PAUSA   1 2 3 4 = hot cues
   Deck B:  O = CUE   P = PLAY/PAUSA   7 8 9 0 = hot cues
   Ctrl+F = buscar    Ctrl+M = MIDI learn    Esc = salir del MIDI learn
+  F1 = manual de ayuda
 
 TRUCOS
   - Clic en el BPM del deck: tap tempo (4 o mas clics al ritmo).

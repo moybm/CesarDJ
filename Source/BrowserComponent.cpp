@@ -1,4 +1,5 @@
 #include "BrowserComponent.h"
+#include "Help.h"
 #include "DJLookAndFeel.h"
 #include "TagReader.h"
 #include "Camelot.h"
@@ -181,6 +182,14 @@ void BrowserComponent::setView (const LibraryView& newView, const juce::String& 
     table.deselectAllRows();
     refreshRows();
     table.scrollToEnsureRowIsOnscreen (0);
+
+    if (view.type == LibraryView::Type::spotify)
+        Help::notice ("spotifyAudio", "Spotify en CesarDJ",
+            juce::String::fromUTF8 ("Aquí ves tus listas de Spotify, pero las canciones no se pueden pinchar desde Spotify: "
+                "Spotify no da el audio a aplicaciones sin acuerdo comercial (sí lo tiene con VirtualDJ, Cross DJ y Edjing Mix).\n\n"
+                "Punto verde = la tienes en tu ordenador y se puede pinchar.\n"
+                "\"· falta\" = doble clic para buscarla en tiendas. Cuando la añadas a tu carpeta de música, pasa a verde sola.\n\n"
+                "Tu sesión queda guardada hasta 180 días."), "spotify");
 }
 
 void BrowserComponent::refreshRows()
@@ -459,6 +468,23 @@ void BrowserComponent::cellDoubleClicked (int row, int, const juce::MouseEvent&)
 {
     if (row < 0 || row >= (int) rows.size())
         return;
+
+    if (view.type == LibraryView::Type::spotify && isMissing (rows[(size_t) row]))
+    {
+        juce::Component::SafePointer<BrowserComponent> safe (this);
+        const auto wantedRow = row;
+        Help::notice ("spotifyMissing", juce::String::fromUTF8 ("Canción que falta"),
+            juce::String::fromUTF8 ("Esta canción está en tu lista de Spotify pero no en tu ordenador, así que no se puede cargar en un deck "
+                "(Spotify no permite pinchar su audio en CesarDJ).\n\n"
+                "A continuación puedes buscarla en Beatport, Bandcamp, Traxsource, Amazon Music o YouTube. "
+                "Cuando la tengas en tu carpeta de música aparecerá en verde."), "spotify",
+            [safe, wantedRow]
+            {
+                if (safe != nullptr && wantedRow < (int) safe->rows.size())
+                    safe->showWantedMenu (wantedRow);
+            });
+        return;
+    }
 
     if (view.type == LibraryView::Type::wanted || isMissing (rows[(size_t) row]))
         showWantedMenu (row);

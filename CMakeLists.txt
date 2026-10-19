@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CesarDJ VERSION 0.11.0)
+project(CesarDJ VERSION 0.12.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -143,7 +143,9 @@ target_sources(CesarDJ PRIVATE
     Source/Automix.cpp
     Source/StemSeparator.cpp
     Source/PlaylistImport.cpp
-        Source/SettingsWindow.cpp)
+        Source/SettingsWindow.cpp
+        Source/Help.cpp
+        Source/HelpContent.cpp)
 
 target_compile_definitions(CesarDJ PRIVATE
     JUCE_WEB_BROWSER=1

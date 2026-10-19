@@ -16,6 +16,7 @@
 #include "StemSeparator.h"
 #include "PlaylistImport.h"
 #include "SettingsWindow.h"
+#include "Help.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -84,7 +85,7 @@ private:
     PlaylistImporter importer { library, settings };
 
     juce::Slider masterVolume { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::TextButton audioButton { "CONFIG" }, midiButton { "MIDI" }, recButton { "REC" }, automixButton { "AUTOMIX" };
+    juce::TextButton helpButton { "AYUDA" }, audioButton { "CONFIG" }, midiButton { "MIDI" }, recButton { "REC" }, automixButton { "AUTOMIX" };
     AutomixController automix { library, { &deckA, &deckB }, { &deckViewA, &deckViewB }, mixerView };
     std::unique_ptr<MidiController> midi;
     std::unique_ptr<SettingsWindow> settingsWindow;

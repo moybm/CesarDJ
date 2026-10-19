@@ -58,7 +58,18 @@ MainComponent::MainComponent()
         if (! stemWorker.isAvailable())         return "SIN MODELO IA";
         return "...";
     };
-    mixerView.onModeChanged = [this] (bool stems) { settings.setValue ("mixerStems", stems); };
+    mixerView.onModeChanged = [this] (bool stems)
+    {
+        settings.setValue ("mixerStems", stems);
+        if (stems && isShowing())       // no al restaurar el modo al arrancar
+            Help::notice ("stemsAI", "Stems",
+                juce::String::fromUTF8 ("Los mandos pasan a VOCAL / INSTRU / BEAT.\n\n"
+                    "Al cargar una canción hay stems rápidos en segundos. La IA prepara a la vez los de calidad, "
+                    "pero la primera vez tarda varios minutos por canción (en un PC modesto, más que lo que dura la canción). "
+                    "Después se guardan y cargan al instante.\n\n"
+                    "Consejo: clic derecho en tus canciones > \"Preparar stems con IA\" para tenerlas listas antes de pinchar. "
+                    "La IA funciona en tu ordenador y no usa internet."), "stems");
+    };
     mixerView.setStemMode (settings.getBoolValue ("mixerStems", false));
     browser.onImportFile = [this] { importer.importFromFile(); };
     browser.onImportSpotify = [this] { importer.importFromSpotify(); };
@@ -111,6 +122,12 @@ MainComponent::MainComponent()
     masterVolume.setComponentID ("master");
     masterVolume.setWantsKeyboardFocus (false);
     addAndMakeVisible (masterVolume);
+
+    Help::install (settings);
+    helpButton.setWantsKeyboardFocus (false);
+    helpButton.onClick = [] { Help::open(); };
+    helpButton.setTooltip (juce::String::fromUTF8 ("Manual de CesarDJ (F1)"));
+    addAndMakeVisible (helpButton);
 
     audioButton.setWantsKeyboardFocus (false);
     audioButton.onClick = [this] { showSettings (SettingsWindow::audioTab); };
@@ -178,6 +195,7 @@ MainComponent::~MainComponent()
     settings.setValue ("automixBeats", automix.getTransitionBeats());
     setLearning (false);
     settingsWindow = nullptr;
+    Help::shutdown();
     midi = nullptr;
     recorder.stop();
 
@@ -317,6 +335,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
+    if (key == juce::KeyPress::F1Key)
+    {
+        Help::open();
+        return true;
+    }
+
     if (ctrlKey (key, 'F'))
     {
         browser.focusSearch();
@@ -421,7 +445,14 @@ void MainComponent::toggleRecording()
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "No se pudo grabar",
                                                 "No se pudo crear el archivo:\n" + file.getFullPathName());
     else
+    {
         showStatus (juce::String::fromUTF8 ("Grabando en ") + file.getFullPathName());
+        Help::notice ("recording", juce::String::fromUTF8 ("Grabación"),
+            juce::String::fromUTF8 ("Se graba exactamente lo que sale por el master, en WAV de 24 bits, en Música\\CesarDJ Grabaciones. "
+                "Pulsa REC otra vez para terminar.\n\n"
+                "Graba para tu uso personal o si tienes derechos sobre la música: publicar mezclas (YouTube, Mixcloud...) "
+                "puede necesitar licencias."), "grabar");
+    }
 }
 
 //==============================================================================
@@ -635,6 +666,8 @@ void MainComponent::resized()
     auto area = getLocalBounds();
 
     auto top = area.removeFromTop (40).reduced (10, 6);
+    helpButton.setBounds (top.removeFromRight (74));
+    top.removeFromRight (6);
     audioButton.setBounds (top.removeFromRight (80));
     top.removeFromRight (6);
     midiButton.setBounds (top.removeFromRight (64));

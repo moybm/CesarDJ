@@ -436,7 +436,8 @@ bool SpotifyClient::ensureToken (juce::String& error)
         if (json["error"].toString() == "invalid_grant")
         {
             logout();
-            error = juce::String::fromUTF8 ("La sesión de Spotify ha caducado. Vuelve a iniciar sesión (SPOTIFY > Iniciar sesión).");
+            error = juce::String::fromUTF8 ("La sesión de Spotify ha caducado (el permiso dura hasta 180 días). "
+                                            "Vuelve a iniciar sesión: SPOTIFY > Iniciar sesión con Spotify.\n\nMás información: AYUDA > Spotify.");
         }
         return false;
     }
@@ -469,7 +470,8 @@ juce::var SpotifyClient::request (const juce::String& url, juce::String& error, 
         error = juce::String::fromUTF8 ("Esta cuenta de Spotify no está autorizada en CesarDJ (403).\n\n"
                                         "El administrador de CesarDJ debe añadirla en developer.spotify.com > CesarDJ > "
                                         "User Management (nombre y correo de la cuenta).\n\n"
-                                        "Mientras tanto puedes importar tus listas con un archivo CSV (Importar > Desde un archivo).");
+                                        "Mientras tanto puedes importar tus listas con un archivo CSV (Importar > Desde un archivo).\n\n"
+                                        "Más información: AYUDA > Spotify > Cuentas autorizadas.");
     else if (status >= 400)
         error = "Error de Spotify (" + juce::String (status) + "): " + json["error"]["message"].toString();
     return json;

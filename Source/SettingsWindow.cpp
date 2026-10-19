@@ -1,5 +1,6 @@
 #include "SettingsWindow.h"
 #include "DJLookAndFeel.h"
+#include "Help.h"
 
 using namespace DJColours;
 
@@ -101,6 +102,12 @@ public:
                 return;
             }
             setRouting (0, 2, false);
+            Help::notice ("audioController", "Controladora con tarjeta de sonido",
+                juce::String::fromUTF8 ("Listo: salidas 1-2 = master (altavoces) y 3-4 = auriculares. Pulsa \"Probar\" para comprobar cada una.\n\n"
+                    "A tener en cuenta:\n"
+                    "- CesarDJ usa el audio de Windows, no ASIO. Para menos retardo elige \"Low Latency Mode\" o \"Exclusive Mode\".\n"
+                    "- Si tu controladora aparece en Windows como dos dispositivos separados (master y auriculares), "
+                    "CesarDJ solo puede abrir uno: usa el que tenga 4 salidas."), "audio");
         };
         presetSplit.onClick = [this] { setRouting (0, -1, true); };
         for (auto* b : { &presetSpeakers, &presetCard, &presetSplit })
@@ -494,7 +501,26 @@ public:
 
     void paint (juce::Graphics& g) override     { g.fillAll (panel); }
 
+    void visibilityChanged() override
+    {
+        if (isShowing() && ! noticeShown)
+        {
+            noticeShown = true;
+            juce::MessageManager::callAsync ([]
+            {
+                Help::notice ("controllersProfiles", "Controladoras",
+                    juce::String::fromUTF8 ("CesarDJ no trae perfiles de fábrica para modelos concretos (Pioneer, Hercules, Numark...): "
+                        "sin el aparato delante no se pueden comprobar sus mensajes MIDI.\n\n"
+                        "La primera vez: pulsa \"Aprender\", haz clic en un control de CesarDJ y muévelo en tu controladora. "
+                        "Después pulsa \"Guardar perfil\": la próxima vez se carga solo al conectarla, también en otro PC.\n\n"
+                        "Las luces (LED) de la controladora no se encienden desde CesarDJ."), "controladoras");
+            });
+        }
+    }
+
 private:
+    bool noticeShown = false;
+
     //== Lista de controladoras
     struct DeviceModel : public juce::ListBoxModel
     {
