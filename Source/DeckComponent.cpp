@@ -738,12 +738,26 @@ void DeckComponent::filesDropped (const juce::StringArray& files, int x, int y)
 
 bool DeckComponent::isInterestedInDragSource (const SourceDetails& details)
 {
-    return details.description.toString().startsWith ("file:");
+    const auto d = details.description.toString();
+    return d.startsWith ("file:") || d.startsWith ("missing:");
 }
 
 void DeckComponent::itemDropped (const SourceDetails& details)
 {
     setDragHighlight (false);
+
+    const auto d = details.description.toString();
+    if (d.startsWith ("missing:"))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, juce::String::fromUTF8 ("Canción que falta"),
+            "\"" + d.fromFirstOccurrenceOf ("missing:", false, false) + "\""
+            + juce::String::fromUTF8 (" no está en tu ordenador, así que no se puede cargar en el deck.\n\n"
+                                      "Las canciones de Spotify solo se pueden pinchar si tienes el archivo: haz doble clic en la "
+                                      "canción para buscarla en tiendas. Cuando esté en tu carpeta de música aparecerá en verde "
+                                      "y ya se podrá arrastrar.\n\nMás información: AYUDA > Spotify."));
+        return;
+    }
+
     loadFile (juce::File (details.description.toString().fromFirstOccurrenceOf ("file:", false, false)
                                                         .upToFirstOccurrenceOf ("|ids:", false, false)));
 }

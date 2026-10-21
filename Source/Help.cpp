@@ -19,6 +19,54 @@ namespace
         return -1;
     }
 
+    // El manual completo como página HTML (se abre en el navegador para leer, imprimir o guardar como PDF)
+    void openPrintable()
+    {
+        auto esc = [] (juce::String s)
+        {
+            return s.replace ("&", "&amp;").replace ("<", "&lt;").replace (">", "&gt;");
+        };
+
+        juce::String html;
+        html << "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Manual de CesarDJ</title><style>"
+                "body{font-family:Segoe UI,Arial,sans-serif;max-width:820px;margin:32px auto;padding:0 20px;color:#1d1f23;line-height:1.5}"
+                "h1{font-size:28px;margin-bottom:4px}h2{font-size:21px;margin-top:36px;border-bottom:2px solid #2fa6e8;padding-bottom:4px}"
+                "h3{font-size:16px;color:#1f6fa0;margin:18px 0 4px}ul{margin:4px 0 8px 0;padding-left:22px}li{margin:2px 0}"
+                ".note{background:#fff4e0;border-left:4px solid #e0912a;padding:6px 10px;margin:10px 0}"
+                "nav a{display:inline-block;margin:2px 10px 2px 0;color:#1f6fa0}"
+                "@media print{nav{display:none}h2{break-after:avoid}}</style></head><body>";
+        html << "<h1>Manual de CesarDJ</h1><p>Versi&oacute;n " << JUCE_APPLICATION_VERSION_STRING << "</p><nav>";
+        for (auto& s : Help::sections())
+            html << "<a href=\"#" << s.id << "\">" << esc (utf8 (s.title)) << "</a>";
+        html << "</nav>";
+
+        for (auto& s : Help::sections())
+        {
+            html << "<h2 id=\"" << s.id << "\">" << esc (utf8 (s.title)) << "</h2>";
+            bool inList = false;
+            for (auto line : juce::StringArray::fromLines (utf8 (s.text)))
+            {
+                const bool bullet = line.startsWith ("- ");
+                if (inList && ! bullet) { html << "</ul>"; inList = false; }
+                if (bullet)
+                {
+                    if (! inList) { html << "<ul>"; inList = true; }
+                    html << "<li>" << esc (line.substring (2)) << "</li>";
+                }
+                else if (line.startsWith ("## "))   html << "<h3>" << esc (line.substring (3)) << "</h3>";
+                else if (line.startsWith ("! "))    html << "<p class=\"note\">" << esc (line.substring (2)) << "</p>";
+                else if (line.isNotEmpty())         html << "<p>" << esc (line) << "</p>";
+            }
+            if (inList)
+                html << "</ul>";
+        }
+        html << "</body></html>";
+
+        const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Manual de CesarDJ.html");
+        if (file.replaceWithText (html, false, false, "\n"))
+            file.startAsProcess();
+    }
+
     //==========================================================================
     class HelpComponent : public juce::Component,
                           private juce::ListBoxModel
@@ -57,6 +105,11 @@ namespace
             };
             addAndMakeVisible (resetButton);
 
+            printButton.setButtonText ("Abrir para imprimir");
+            printButton.setTooltip (utf8 ("Abre el manual completo en tu navegador: para leerlo, imprimirlo o guardarlo como PDF"));
+            printButton.onClick = [] { openPrintable(); };
+            addAndMakeVisible (printButton);
+
             footer.setText (Branding::appName + " " + JUCE_APPLICATION_VERSION_STRING
                             + utf8 ("   ·   F1 abre este manual desde cualquier sitio"), juce::dontSendNotification);
             footer.setColour (juce::Label::textColourId, textDim);
@@ -87,6 +140,8 @@ namespace
             auto r = getLocalBounds();
             auto bottom = r.removeFromBottom (40).reduced (12, 6);
             resetButton.setBounds (bottom.removeFromRight (230));
+            bottom.removeFromRight (8);
+            printButton.setBounds (bottom.removeFromRight (170));
             footer.setBounds (bottom);
 
             auto left = r.removeFromLeft (250);
@@ -146,7 +201,10 @@ namespace
             index.repaint();
 
             if (! visible.empty())
+            {
                 index.selectRow (0);
+                render (visible[0]);        // aunque ya estuviera elegido: así se resaltan las palabras
+            }
             else
             {
                 content.clear();
@@ -161,11 +219,36 @@ namespace
             const auto& s = Help::sections()[(size_t) sectionIndex];
             content.clear();
 
-            auto put = [this] (const juce::String& t, float size, bool bold, juce::Colour c)
+            // Las palabras buscadas se resaltan en amarillo
+            const auto words = juce::StringArray::fromTokens (search.getText().trim(), " ", "");
+            auto put = [this, &words] (const juce::String& t, float size, bool bold, juce::Colour c)
             {
-                content.setFont (juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain));
-                content.setColour (juce::TextEditor::textColourId, c);
-                content.insertTextAtCaret (t);
+                auto rest = t;
+                while (rest.isNotEmpty())
+                {
+                    int at = -1, length = 0;
+                    for (auto& w : words)
+                    {
+                        const int i = rest.indexOfIgnoreCase (w);
+                        if (w.isNotEmpty() && i >= 0 && (at < 0 || i < at))
+                        {
+                            at = i;
+                            length = w.length();
+                        }
+                    }
+
+                    const auto plain = at < 0 ? rest : rest.substring (0, at);
+                    content.setFont (juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain));
+                    content.setColour (juce::TextEditor::textColourId, c);
+                    content.insertTextAtCaret (plain);
+                    if (at < 0)
+                        break;
+
+                    content.setFont (juce::FontOptions (size, juce::Font::bold));
+                    content.setColour (juce::TextEditor::textColourId, juce::Colour (0xffffd54a));
+                    content.insertTextAtCaret (rest.substring (at, at + length));
+                    rest = rest.substring (at + length);
+                }
             };
 
             put ("\n", 10.0f, false, text);       // margen: al volver arriba el título no queda cortado
@@ -189,7 +272,7 @@ namespace
 
         juce::TextEditor search, content;
         juce::ListBox index;
-        juce::TextButton resetButton;
+        juce::TextButton resetButton, printButton;
         juce::Label footer;
         std::vector<int> visible;
     };

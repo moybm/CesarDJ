@@ -549,13 +549,13 @@ void BrowserComponent::sortOrderChanged (int columnId, bool forwards)
 
 juce::var BrowserComponent::getDragSourceDescription (const juce::SparseSet<int>& selectedRows)
 {
-    if (selectedRows.isEmpty() || selectedRows[0] >= (int) rows.size() || view.type == LibraryView::Type::wanted)
+    if (selectedRows.isEmpty() || selectedRows[0] >= (int) rows.size())
         return {};
 
     juce::StringArray ids;
     const LibraryTrack* first = nullptr;
     for (int i = 0; i < selectedRows.size(); ++i)
-        if (selectedRows[i] < (int) rows.size() && ! isMissing (rows[(size_t) selectedRows[i]]))
+        if (selectedRows[i] < (int) rows.size() && view.type != LibraryView::Type::wanted && ! isMissing (rows[(size_t) selectedRows[i]]))
         {
             const auto& t = rows[(size_t) selectedRows[i]];
             ids.add (juce::String (t.id));
@@ -563,8 +563,13 @@ juce::var BrowserComponent::getDragSourceDescription (const juce::SparseSet<int>
                 first = &t;
         }
 
+    // Solo canciones que no están en el ordenador (Spotify, "Por conseguir"): se pueden arrastrar,
+    // y el deck explica por qué no se cargan en vez de no hacer nada
     if (first == nullptr)
-        return {};
+    {
+        const auto& t = rows[(size_t) selectedRows[0]];
+        return "missing:" + (t.artist.isNotEmpty() ? t.artist + " - " : juce::String()) + t.title;
+    }
 
     // El deck usa el primer archivo; las listas usan todos los ids
     return "file:" + first->file.getFullPathName() + "|ids:" + ids.joinIntoString (",");
@@ -741,8 +746,10 @@ void BrowserComponent::updateInfo()
         cover = t != nullptr ? TagReader::readCoverArt (t->file) : juce::Image();
     }
 
-    loadA.setEnabled (t != nullptr);
-    loadB.setEnabled (t != nullptr);
+    // Las que faltan (Spotify, "Por conseguir") no se pueden cargar
+    const bool canLoad = t != nullptr && view.type != LibraryView::Type::wanted && ! isMissing (*t);
+    loadA.setEnabled (canLoad);
+    loadB.setEnabled (canLoad);
     repaint (infoArea);
 }
 

@@ -1,4 +1,5 @@
 #include "Branding.h"
+#include "Help.h"
 #include "BinaryData.h"
 
 juce::String Branding::version()
@@ -72,9 +73,21 @@ void Branding::migrateOldData()
 
 void Branding::showAbout()
 {
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::NoIcon, appName + "  v" + version(),
+    juce::AlertWindow::showYesNoCancelBox (juce::MessageBoxIconType::NoIcon, appName + "  v" + version(),
         juce::String::fromUTF8 ("Software DJ para uso personal.\n\n"
-                                "Datos (biblioteca, ajustes, MIDI):\n") + dataFolder().getFullPathName()
-        + juce::String::fromUTF8 ("\n\nActualizar: instala la versión nueva encima; la biblioteca y los ajustes se conservan.\n\n"
-                                  "Hecho con JUCE, SoundTouch (LGPL) y SQLite."));
+                                "Tus datos (biblioteca, ajustes, perfiles de controladoras):\n") + dataFolder().getFullPathName()
+        + juce::String::fromUTF8 ("\n\nActualizar: instala la versión nueva encima; la biblioteca y los ajustes se conservan. "
+                                  "Las versiones se publican en GitHub (moybm/CesarDJ > Releases).\n\n"
+                                  "Hecho con JUCE, SoundTouch (LGPL), SQLite y demucs.cpp (Demucs v4, MIT)."),
+        "Abrir carpeta de datos", "Manual", "Cerrar", nullptr,
+        juce::ModalCallbackFunction::create ([] (int result)
+        {
+            if (result == 1)
+            {
+                dataFolder().createDirectory();
+                dataFolder().startAsProcess();
+            }
+            else if (result == 2)
+                Help::open ("datos");
+        }));
 }
