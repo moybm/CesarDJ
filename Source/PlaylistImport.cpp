@@ -5,6 +5,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "SpotifyConfig.h"
 #include "Branding.h"
+#include "Help.h"
 
 using namespace DJColours;
 
@@ -252,6 +253,7 @@ juce::String SpotifyClient::makeAuthUrl (const juce::String& challenge, const ju
 
 bool SpotifyClient::exchangeCode (const juce::String& code, const juce::String& verifier, juce::String& error)
 {
+    forbidden = false;
     const auto json = postForm ("https://accounts.spotify.com/api/token",
                                 "grant_type=authorization_code&code=" + urlEncode (code)
                                 + "&redirect_uri=" + urlEncode (redirectUri)
@@ -326,6 +328,7 @@ juce::var SpotifyClient::postForm (const juce::String& url, const juce::String& 
 
 bool SpotifyClient::login (const std::function<bool()>& shouldStop, juce::String& error)
 {
+    forbidden = false;
     const auto clientId = getClientId();
     if (clientId.isEmpty())
     {
@@ -466,11 +469,14 @@ juce::var SpotifyClient::request (const juce::String& url, juce::String& error, 
     }
 
     const auto json = juce::JSON::parse (stream->readEntireStreamAsString());
+    forbidden = status == 403;
     if (status == 403)
-        error = juce::String::fromUTF8 ("Esta cuenta de Spotify no está autorizada en CesarDJ (403).\n\n"
-                                        "El administrador de CesarDJ debe añadirla en developer.spotify.com > CesarDJ > "
-                                        "User Management (nombre y correo de la cuenta).\n\n"
-                                        "Mientras tanto puedes importar tus listas con un archivo CSV (Importar > Desde un archivo).\n\n"
+        error = juce::String::fromUTF8 ("Esta cuenta de Spotify todavía no está autorizada para usar CesarDJ (error 403).\n\n"
+                                        "Qué hacer: pide a quien te dio CesarDJ que añada tu cuenta. Necesita el nombre y el "
+                                        "correo con los que entras en Spotify (él lo hace en su panel: developer.spotify.com > "
+                                        "CesarDJ > User Management). Después vuelve a pulsar \"Iniciar sesión con Spotify\".\n\n"
+                                        "Tú no tienes que entrar en la web de desarrolladores de Spotify ni copiar nada de ella.\n\n"
+                                        "Mientras tanto puedes importar tus listas con un archivo CSV (Importar > Desde un archivo). "
                                         "Más información: AYUDA > Spotify > Cuentas autorizadas.");
     else if (status >= 400)
         error = "Error de Spotify (" + juce::String (status) + "): " + json["error"]["message"].toString();
@@ -968,6 +974,33 @@ namespace
             .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2().withUserDataFolder (webViewDataFolder()));
     }
 
+    // Páginas que pueden abrirse dentro de la ventana de inicio de sesión: Spotify y los inicios de sesión
+    // con Google, Facebook o Apple. Lo demás (registro, condiciones...) se abre en el navegador normal, y la web
+    // de desarrolladores de Spotify no se abre nunca: quien inicia sesión no tiene nada que hacer allí.
+    enum class LoginPage { allowed, external, blocked };
+
+    LoginPage classifyLoginPage (const juce::String& url)
+    {
+        if (! url.startsWithIgnoreCase ("http"))
+            return LoginPage::allowed;                  // about:blank, data:...
+
+        const auto host = url.fromFirstOccurrenceOf ("://", false, false).upToFirstOccurrenceOf ("/", false, false)
+                             .upToFirstOccurrenceOf ("?", false, false).upToFirstOccurrenceOf (":", false, false).toLowerCase();
+        auto under = [&host] (const char* domain)
+        {
+            const juce::String d (domain);
+            return host == d || host.endsWith ("." + d);
+        };
+
+        if (under ("developer.spotify.com"))
+            return LoginPage::blocked;
+        if (host == "accounts.spotify.com" || host == "challenge.spotify.com" || host == "login.spotify.com"
+            || under ("google.com") || under ("gstatic.com") || under ("recaptcha.net")
+            || under ("facebook.com") || under ("apple.com"))
+            return LoginPage::allowed;
+        return LoginPage::external;
+    }
+
     // Página oficial de Spotify; cuando Spotify vuelve a la dirección de retorno, se intercepta (no se carga)
     class SpotifyLoginBrowser : public juce::WebBrowserComponent
     {
@@ -977,19 +1010,44 @@ namespace
 
         bool pageAboutToLoad (const juce::String& url) override
         {
-            if (! url.startsWith (SpotifyClient::redirectUri))
-                return true;
-
-            if (! handled && redirect != nullptr)
+            if (url.startsWith (SpotifyClient::redirectUri))
             {
-                handled = true;
-                auto r = redirect;
-                juce::MessageManager::callAsync ([r, url] { r (url); });
+                if (! handled && redirect != nullptr)
+                {
+                    handled = true;
+                    auto r = redirect;
+                    juce::MessageManager::callAsync ([r, url] { r (url); });
+                }
+                return false;
+            }
+
+            switch (classifyLoginPage (url))
+            {
+                case LoginPage::allowed:
+                    return true;
+                case LoginPage::external:
+                    juce::URL (url).launchInDefaultBrowser();
+                    return false;
+                case LoginPage::blocked:
+                    juce::MessageManager::callAsync ([]
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Spotify",
+                            juce::String::fromUTF8 ("Para usar CesarDJ no hace falta entrar en la web de desarrolladores de Spotify, "
+                                                    "así que no se abre aquí.\n\nSolo tienes que iniciar sesión con tu cuenta de Spotify "
+                                                    "y pulsar \"Aceptar\"."));
+                    });
+                    return false;
             }
             return false;
         }
 
-        void newWindowAttemptingToLoad (const juce::String& url) override   { goToURL (url); }
+        void newWindowAttemptingToLoad (const juce::String& url) override
+        {
+            if (classifyLoginPage (url) == LoginPage::allowed)
+                goToURL (url);
+            else if (classifyLoginPage (url) == LoginPage::external)
+                juce::URL (url).launchInDefaultBrowser();
+        }
 
     private:
         std::function<void (const juce::String&)> redirect;
@@ -1036,7 +1094,15 @@ void PlaylistImporter::loginSpotify()
         showSpotifySetup();
         return;
     }
-    startLogin();
+
+    std::weak_ptr<bool> weak = alive;
+    Help::notice ("spotifyLogin", juce::String::fromUTF8 ("Iniciar sesión con Spotify"),
+        juce::String::fromUTF8 ("Se abrirá la página oficial de Spotify: entra con tu cuenta y pulsa \"Aceptar\". "
+            "CesarDJ nunca ve tu contraseña y solo lee los nombres de tus listas, canciones que te gustan y álbumes.\n\n"
+            "Importante: tu cuenta tiene que estar autorizada antes por quien te dio CesarDJ (necesita tu nombre y tu correo "
+            "de Spotify). Si no lo está, Spotify te dejará entrar pero CesarDJ te avisará de que la cuenta no está autorizada.\n\n"
+            "No hace falta entrar en la web de desarrolladores de Spotify ni copiar nada de ella."),
+        "spotify", [this, weak] { if (! weak.expired()) startLogin(); });
 }
 
 void PlaylistImporter::startLogin()
@@ -1059,6 +1125,11 @@ void PlaylistImporter::startLogin()
             const bool ok = spotify.login ([this] { return cancel.load(); }, error) && spotify.fetchUserName (error);
             if (ok)
                 spotifyLists = spotify.listPlaylists (error);
+            if (spotify.wasForbidden())
+            {
+                spotify.logout();
+                spotifyLists.clear();
+            }
             juce::MessageManager::callAsync ([this, weak, ok, error]
             {
                 if (weak.expired()) return;
@@ -1092,7 +1163,17 @@ void PlaylistImporter::startLogin()
             if (code.isNotEmpty() && stateOk)
                 finishLogin (code);
             else
+            {
+                const auto spotifyError = values[names.indexOf ("error")];
                 status (juce::String::fromUTF8 ("Spotify: inicio de sesión cancelado"));
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify",
+                    spotifyError == "access_denied"
+                        ? juce::String::fromUTF8 ("Has pulsado \"Cancelar\" en Spotify, así que CesarDJ no se ha conectado.\n\n"
+                                                  "Para conectar, vuelve a pulsar \"Iniciar sesión con Spotify\" y acepta.")
+                        : juce::String::fromUTF8 ("Spotify no ha completado el inicio de sesión")
+                              + (spotifyError.isNotEmpty() ? " (" + spotifyError + ")" : juce::String())
+                              + juce::String::fromUTF8 (".\n\nVuelve a intentarlo. Si se repite, mira AYUDA > Spotify."));
+            }
         },
         [this, weak]
         {
@@ -1111,6 +1192,8 @@ void PlaylistImporter::finishLogin (const juce::String& code)
         juce::String error;
         const bool ok = spotify.exchangeCode (code, verifier, error) && spotify.fetchUserName (error);
         auto lists = ok ? spotify.listPlaylists (error) : std::vector<ExternalPlaylist>();
+        if (spotify.wasForbidden())
+            spotify.logout();           // cuenta no autorizada: no se guarda una sesión que no sirve
 
         juce::MessageManager::callAsync ([this, weak, ok, error, lists]
         {
@@ -1156,10 +1239,18 @@ void PlaylistImporter::refreshSpotify()
     {
         juce::String error;
         auto lists = spotify.listPlaylists (error);
-        juce::MessageManager::callAsync ([this, weak, lists, error]
+        const bool forbidden = spotify.wasForbidden();
+        if (forbidden)
+            spotify.logout();           // sesión guardada de una cuenta no autorizada: no sirve
+        juce::MessageManager::callAsync ([this, weak, lists, error, forbidden]
         {
             if (weak.expired()) return;
-            if (error.isNotEmpty())
+            if (forbidden)
+            {
+                spotifyLists.clear();
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify", error);
+            }
+            else if (error.isNotEmpty())
                 status ("Spotify: " + error.upToFirstOccurrenceOf ("\n", false, false));
             else
                 spotifyLists = lists;

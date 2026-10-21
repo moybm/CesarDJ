@@ -225,7 +225,14 @@ Botón "Importar" (abajo a la izquierda) o clic derecho en LISTAS.
 
 ## Cuentas autorizadas
 - CesarDJ está registrado en Spotify en "modo desarrollo". En ese modo solo pueden entrar las cuentas que el administrador de CesarDJ añade en developer.spotify.com > CesarDJ > User Management (nombre y correo de la cuenta). El número de cuentas permitidas es limitado y lo indica ese panel.
-- Si una cuenta no está autorizada, Spotify responde con un error 403. Mientras tanto se pueden importar las listas con un CSV.
+- Si una cuenta no está autorizada, Spotify deja iniciar sesión pero después responde con un error 403: CesarDJ lo avisa y no guarda esa sesión. Mientras tanto se pueden importar las listas con un CSV.
+
+## Usar CesarDJ con la cuenta de otra persona (un amigo, otro PC)
+- Esa persona instala CesarDJ y, antes de iniciar sesión, te pasa el nombre y el correo con los que entra en Spotify.
+- Tú (el administrador) entras en developer.spotify.com > Dashboard > CesarDJ > User Management y la añades con ese nombre y ese correo.
+- Ella pulsa SPOTIFY > "Iniciar sesión con Spotify", entra con su cuenta y acepta. Ya está.
+- La otra persona no tiene que crear nada en Spotify ni entrar en la web de desarrolladores. La ventana de inicio de sesión de CesarDJ solo muestra las páginas para entrar (Spotify, Google, Facebook o Apple): la web de desarrolladores no se abre, y el resto de enlaces se abren en el navegador normal.
+! Si alguien te envía un texto que empieza por "Authorization token" o "const token =", es una página de ejemplo de la web de desarrolladores de Spotify, no un error de CesarDJ. Ese texto incluye una clave de acceso temporal a su cuenta: no hay que usarlo ni reenviarlo.
 - Spotify puede exigir que la cuenta propietaria de la app (la que la registró) tenga Premium. Si esa cuenta deja de ser Premium (por ejemplo, al acabar una prueba gratuita), el inicio de sesión podría dejar de funcionar para todos. En ese caso revisa el aviso del panel de desarrollador.
 - El Client ID de CesarDJ no es una contraseña: es el identificador público de la app. El "Client secret" no se usa nunca.
 )MANUAL" },
@@ -287,7 +294,8 @@ Lo que CesarDJ no hace, y por qué:
 - Si no aparece, desconéctala y vuelve a conectarla, o prueba otro puerto USB.
 
 ## Spotify
-- Error 403: la cuenta no está autorizada (ver Spotify > Cuentas autorizadas).
+- Error 403: la cuenta no está autorizada. El administrador de CesarDJ debe añadirla (ver Spotify > Usar CesarDJ con la cuenta de otra persona).
+- Ha salido un texto con "const token =": es la web de desarrolladores de Spotify, no un error. Cierra esa ventana y vuelve a iniciar sesión.
 - "La sesión ha caducado": vuelve a iniciar sesión.
 - No carga las listas: comprueba la conexión a internet y usa "Actualizar listas".
 

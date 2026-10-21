@@ -55,6 +55,9 @@ public:
     std::vector<PlaylistInfo> listPlaylists (juce::String& error);
     std::optional<ImportedPlaylist> fetchPlaylist (const PlaylistInfo& playlist, juce::String& error);
 
+    // La última petición fue rechazada con 403: la cuenta no está autorizada (User Management)
+    bool wasForbidden() const                       { return forbidden.load(); }
+
 private:
     juce::var request (const juce::String& url, juce::String& error, int& status);
     juce::var postForm (const juce::String& url, const juce::String& body, juce::String& error);
@@ -63,6 +66,7 @@ private:
     juce::PropertiesFile& settings;
     juce::String accessToken;
     juce::uint32 tokenExpiry = 0;
+    std::atomic<bool> forbidden { false };
     juce::CriticalSection lock;
 };
 
