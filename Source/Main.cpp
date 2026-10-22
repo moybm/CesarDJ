@@ -36,7 +36,13 @@ public:
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
 
-    void systemRequestedQuit() override  { quit(); }
+    // Cerrar: si "Confirmar antes de cerrar" (CONFIG > Funciones) está activada y algo suena o graba, se pregunta antes
+    void systemRequestedQuit() override
+    {
+        if (mainWindow != nullptr && mainWindow->askBeforeQuit())
+            return;
+        quit();
+    }
 
 private:
     class MainWindow : public juce::DocumentWindow
@@ -72,6 +78,12 @@ private:
         {
             if (auto* main = dynamic_cast<MainComponent*> (getContentComponent()))
                 main->loadFiles (commandLine);
+        }
+
+        bool askBeforeQuit()
+        {
+            auto* main = dynamic_cast<MainComponent*> (getContentComponent());
+            return main != nullptr && main->askBeforeQuit();
         }
 
         void closeButtonPressed() override

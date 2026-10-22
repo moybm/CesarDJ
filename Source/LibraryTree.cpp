@@ -316,6 +316,7 @@ private:
                 if (! tree.spotifyConnected)
                 {
                     m.addItem (juce::String::fromUTF8 ("Iniciar sesión con Spotify..."), [this] { if (tree.onSpotifyLogin) tree.onSpotifyLogin(); });
+                    m.addItem ("Client ID y ajustes de Spotify...", [this] { if (tree.onSpotifySettings) tree.onSpotifySettings(); });
                     break;
                 }
                 if (kind == Kind::spotifyList)
@@ -329,6 +330,7 @@ private:
                 }
                 m.addItem ("Actualizar listas", [this] { if (tree.onSpotifyRefresh) tree.onSpotifyRefresh(); });
                 m.addItem ("Importar varias listas...", [this] { if (tree.onSpotifyImportAll) tree.onSpotifyImportAll(); });
+                m.addItem ("Client ID y ajustes de Spotify...", [this] { if (tree.onSpotifySettings) tree.onSpotifySettings(); });
                 m.addSeparator();
                 m.addItem (juce::String::fromUTF8 ("Cerrar sesión de Spotify"), [this]
                 {

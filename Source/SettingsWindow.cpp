@@ -1,6 +1,7 @@
 #include "SettingsWindow.h"
 #include "DJLookAndFeel.h"
 #include "Help.h"
+#include "Features.h"
 
 using namespace DJColours;
 
@@ -733,7 +734,388 @@ private:
 };
 
 //==============================================================================
-SettingsWindow::SettingsWindow (juce::AudioDeviceManager& devices, MixerEngine& mixer, MidiController& midi,
+// Pestaña Funciones: funciones opcionales agrupadas por categoría (todas desactivadas por defecto)
+class FeaturesPage : public juce::Component
+{
+public:
+    explicit FeaturesPage (juce::PropertiesFile& s) : settings (s)
+    {
+        viewport.setViewedComponent (&content, false);
+        viewport.setScrollBarsShown (true, false);
+        viewport.setScrollBarThickness (10);
+        addAndMakeVisible (viewport);
+
+        note (juce::String::fromUTF8 ("Funciones opcionales. Todas vienen desactivadas: activa las que quieras. "
+                                      "Los cambios se guardan solos y se aplican al momento."), false);
+
+        section (juce::String::fromUTF8 ("PROTECCIÓN ANTI-DESASTRES"));
+        check (Features::silenceAlert, "Alerta de silencio",
+               juce::String::fromUTF8 ("Avisa en rojo, arriba, cuando lo que suena está a punto de acabar y no hay otra canción sonando. "
+                                       "No avisa con el Automix activado (él ya se encarga)."));
+        combo (Features::silenceSeconds, "Avisar con", { { "10 segundos de antelación", 10 }, { "20 segundos de antelación", 20 },
+                                                         { "30 segundos de antelación", 30 } }, 20, Features::silenceAlert);
+        check (Features::clipAlert, juce::String::fromUTF8 ("Aviso de saturación del master"),
+               juce::String::fromUTF8 ("Avisa cuando la mezcla suena tan fuerte que el limitador tiene que aplastarla: "
+                                       "baja el GAIN de los canales o el volumen master."));
+        check (Features::confirmQuit, juce::String::fromUTF8 ("Confirmar antes de cerrar CesarDJ"),
+               juce::String::fromUTF8 ("Si hay música sonando o una grabación en marcha, pregunta antes de cerrar el programa."));
+
+        section (juce::String::fromUTF8 ("DESPUÉS DE LA SESIÓN"));
+        check (Features::tracklist, "Tracklist con tiempos al grabar",
+               juce::String::fromUTF8 ("Mientras grabas, apunta qué canción suena y en qué minuto. Al terminar se guarda junto a la "
+                                       "grabación (.txt) y se puede copiar para pegarlo en YouTube o Mixcloud."));
+        combo (Features::tracklistFormat, "Formato", { { "YouTube (00:00 Artista - Título)", 0 },
+                                                       { "Mixcloud (1. Artista - Título (00:00))", 1 },
+                                                       { "Texto simple (Artista - Título)", 2 } }, 0, Features::tracklist);
+
+        section (juce::String::fromUTF8 ("CALIDAD DE LA MÚSICA"));
+        check (Features::autoGain, "Volumen igualado",
+               juce::String::fromUTF8 ("Al cargar una canción, CesarDJ mide lo fuerte que suena y ajusta el GAIN de su canal para que "
+                                       "todas suenen parecido. Puedes retocar el GAIN a mano después."));
+        combo (Features::autoGainLevel, "Nivel", { { "Suave (para casa o de fondo)", 0 }, { "Normal", 1 },
+                                                   { "Club (más fuerte)", 2 } }, 1, Features::autoGain);
+
+        section ("SEGURIDAD");
+        combo (Features::recovery, juce::String::fromUTF8 ("Recuperación tras un cierre inesperado"),
+               { { "Desactivada", 0 }, { "Preguntar al abrir CesarDJ", 1 }, { "Restaurar siempre", 2 } }, 0, nullptr);
+        note (juce::String::fromUTF8 ("Si CesarDJ o el PC se cierran de golpe, al volver a abrirlo deja las canciones en los decks "
+                                      "en el mismo punto (en pausa) y repara la grabación que estaba en marcha."), true);
+
+        helpButton.setButtonText (juce::String::fromUTF8 ("Ayuda: funciones opcionales"));
+        helpButton.onClick = [] { Help::open ("funciones"); };
+        content.addAndMakeVisible (helpButton);
+        rows.push_back ({ &helpButton, 30, 0, 14, 260 });
+
+        updateEnablement();
+    }
+
+    void resized() override
+    {
+        viewport.setBounds (getLocalBounds());
+        const int width = juce::jmax (300, getWidth() - viewport.getScrollBarThickness());
+        int y = 12;
+        for (auto& r : rows)
+        {
+            y += r.gapBefore;
+            const int w = width - 32 - r.indent;
+            r.comp->setBounds (16 + r.indent, y, r.maxWidth > 0 ? juce::jmin (w, r.maxWidth) : w, r.height);
+            y += r.height;
+        }
+        content.setSize (width, y + 16);
+    }
+
+    void paint (juce::Graphics& g) override     { g.fillAll (panel); }
+
+private:
+    // Fila "título  [desplegable]"
+    struct ComboRow : public juce::Component
+    {
+        juce::Label label;
+        juce::ComboBox box;
+        int labelWidth = 120;
+
+        ComboRow()
+        {
+            addAndMakeVisible (label);
+            addAndMakeVisible (box);
+        }
+
+        void resized() override
+        {
+            label.setBounds (0, 0, labelWidth, getHeight());
+            box.setBounds (labelWidth, 0, juce::jmin (380, getWidth() - labelWidth), getHeight());
+        }
+    };
+
+    struct Row
+    {
+        juce::Component* comp;
+        int height, indent, gapBefore, maxWidth;
+    };
+
+    void section (const juce::String& title)
+    {
+        auto* l = new juce::Label ({}, title);
+        owned.add (l);
+        l->setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        l->setColour (juce::Label::textColourId, juce::Colours::white);
+        content.addAndMakeVisible (l);
+        rows.push_back ({ l, 22, 0, 16, 0 });
+    }
+
+    void note (const juce::String& message, bool indented)
+    {
+        auto* l = new juce::Label ({}, message);
+        owned.add (l);
+        l->setFont (juce::FontOptions (12.5f));
+        l->setColour (juce::Label::textColourId, textDim);
+        l->setJustificationType (juce::Justification::topLeft);
+        l->setMinimumHorizontalScale (1.0f);
+        content.addAndMakeVisible (l);
+        rows.push_back ({ l, 36, indented ? 26 : 0, 0, 0 });
+    }
+
+    void check (const char* key, const juce::String& title, const juce::String& description)
+    {
+        auto* t = new juce::ToggleButton (title);
+        owned.add (t);
+        t->setToggleState (Features::on (settings, key), juce::dontSendNotification);
+        t->setColour (juce::ToggleButton::textColourId, text);
+        t->setColour (juce::ToggleButton::tickColourId, play);
+        t->onClick = [this, t, key]
+        {
+            settings.setValue (key, t->getToggleState());
+            settings.saveIfNeeded();
+            updateEnablement();
+        };
+        content.addAndMakeVisible (t);
+        rows.push_back ({ t, 26, 0, 6, 0 });
+        toggles[key] = t;
+        note (description, true);
+    }
+
+    void combo (const char* key, const juce::String& title, std::vector<std::pair<const char*, int>> options, int def,
+                const char* dependsOn)
+    {
+        auto* row = new ComboRow();
+        owned.add (row);
+        row->label.setText (title, juce::dontSendNotification);
+        row->label.setFont (juce::FontOptions (13.0f));
+        row->label.setColour (juce::Label::textColourId, dependsOn != nullptr ? textDim : text);
+        row->labelWidth = dependsOn != nullptr ? 110 : 290;
+
+        auto& box = row->box;
+        for (auto& o : options)
+            box.addItem (juce::String::fromUTF8 (o.first), o.second + 1000);   // id = valor + 1000 (un id no puede ser 0)
+        box.setSelectedId (Features::value (settings, key, def) + 1000, juce::dontSendNotification);
+        box.onChange = [this, &box, key]
+        {
+            settings.setValue (key, box.getSelectedId() - 1000);
+            settings.saveIfNeeded();
+        };
+
+        content.addAndMakeVisible (row);
+        rows.push_back ({ row, 28, dependsOn != nullptr ? 26 : 0, dependsOn != nullptr ? 0 : 6, 0 });
+        if (dependsOn != nullptr)
+            dependents.push_back ({ row, dependsOn });
+    }
+
+    // Las opciones de una función solo se pueden tocar si la función está activada
+    void updateEnablement()
+    {
+        for (auto& d : dependents)
+            if (auto it = toggles.find (d.second); it != toggles.end())
+                d.first->setEnabled (it->second->getToggleState());
+    }
+
+    juce::PropertiesFile& settings;
+    juce::Viewport viewport;
+    juce::Component content;
+    juce::OwnedArray<juce::Component> owned;
+    std::vector<Row> rows;
+    std::map<juce::String, juce::ToggleButton*> toggles;
+    std::vector<std::pair<juce::Component*, const char*>> dependents;
+    juce::TextButton helpButton;
+};
+
+//==============================================================================
+// Pestaña Spotify: sesión y Client ID propio
+class SpotifyPage : public juce::Component,
+                    private juce::Timer
+{
+public:
+    explicit SpotifyPage (PlaylistImporter& imp) : importer (imp)
+    {
+        makeLabel (*this, labels, "CUENTA DE SPOTIFY", true);
+        makeLabel (*this, labels, "CLIENT ID (LA APP DE SPOTIFY QUE USA CESARDJ)", true);
+
+        sessionLabel.setColour (juce::Label::textColourId, text);
+        sessionLabel.setFont (juce::FontOptions (14.0f));
+        addAndMakeVisible (sessionLabel);
+        sessionButton.onClick = [this]
+        {
+            if (importer.isSpotifyConnected())
+                importer.logoutSpotify();
+            else
+                importer.loginSpotify();
+            update();
+        };
+        addAndMakeVisible (sessionButton);
+
+        inUseLabel.setColour (juce::Label::textColourId, textDim);
+        inUseLabel.setFont (juce::FontOptions (13.0f));
+        addAndMakeVisible (inUseLabel);
+
+        idEditor.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 15.0f, juce::Font::plain));
+        idEditor.setInputRestrictions (40, "0123456789abcdefABCDEF");
+        idEditor.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Pega aquí tu Client ID (32 caracteres)"), textDim);
+        idEditor.setText (importer.isUsingCustomClientId() ? importer.getSpotifyClientId() : juce::String(), false);
+        idEditor.onReturnKey = [this] { save(); };
+        addAndMakeVisible (idEditor);
+
+        saveButton.setColour (juce::TextButton::buttonColourId, deckA.darker (0.3f));
+        saveButton.onClick = [this] { save(); };
+        builtInButton.onClick = [this] { useBuiltIn(); };
+        addAndMakeVisible (saveButton);
+        addAndMakeVisible (builtInButton);
+
+        makeLabel (*this, labels, juce::String::fromUTF8 ("Dirección de retorno (Redirect URI)"));
+        redirect.setText (SpotifyClient::redirectUri, juce::dontSendNotification);
+        redirect.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 14.0f, juce::Font::plain));
+        redirect.setColour (juce::Label::textColourId, text);
+        redirect.setColour (juce::Label::backgroundColourId, inset);
+        addAndMakeVisible (redirect);
+        copyButton.onClick = []
+        {
+            juce::SystemClipboard::copyTextToClipboard (SpotifyClient::redirectUri);
+        };
+        addAndMakeVisible (copyButton);
+        dashboardButton.onClick = [] { juce::URL ("https://developer.spotify.com/dashboard").launchInDefaultBrowser(); };
+        addAndMakeVisible (dashboardButton);
+        manualButton.onClick = [] { Help::open ("spotifypropia"); };
+        addAndMakeVisible (manualButton);
+
+        help.setColour (juce::Label::textColourId, textDim);
+        help.setFont (juce::FontOptions (12.5f));
+        help.setJustificationType (juce::Justification::topLeft);
+        help.setText (juce::String::fromUTF8 (
+            "Para usar tu propia app de Spotify (por ejemplo, con tu cuenta Premium):\n"
+            "1. Entra en el panel de Spotify con tu cuenta y pulsa \"Create app\". Nombre: CesarDJ (o el que quieras).\n"
+            "2. En \"Redirect URIs\" pega la dirección de retorno de arriba (botón Copiar) y marca \"Web API\". Guarda.\n"
+            "3. Copia el \"Client ID\" de tu app y pégalo aquí. Pulsa Guardar.\n"
+            "4. En \"User Management\" añade las cuentas que vayan a usar CesarDJ (nombre y correo de Spotify).\n"
+            "5. Vuelve a iniciar sesión con Spotify.\n\n"
+            "Nunca pegues el \"Client secret\": CesarDJ no lo necesita. Al cambiar de Client ID se cierra la sesión actual."),
+            juce::dontSendNotification);
+        addAndMakeVisible (help);
+
+        update();
+        startTimerHz (2);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (16, 12);
+        labels[0]->setBounds (r.removeFromTop (20));
+        r.removeFromTop (4);
+        {
+            auto line = r.removeFromTop (30);
+            sessionButton.setBounds (line.removeFromRight (190));
+            sessionLabel.setBounds (line);
+        }
+        r.removeFromTop (18);
+        labels[1]->setBounds (r.removeFromTop (20));
+        r.removeFromTop (2);
+        inUseLabel.setBounds (r.removeFromTop (22));
+        r.removeFromTop (4);
+        {
+            auto line = r.removeFromTop (30);
+            builtInButton.setBounds (line.removeFromRight (150));
+            line.removeFromRight (6);
+            saveButton.setBounds (line.removeFromRight (100));
+            line.removeFromRight (8);
+            idEditor.setBounds (line);
+        }
+        r.removeFromTop (12);
+        labels[2]->setBounds (r.removeFromTop (20));
+        {
+            auto line = r.removeFromTop (28);
+            copyButton.setBounds (line.removeFromRight (100));
+            line.removeFromRight (8);
+            redirect.setBounds (line);
+        }
+        r.removeFromTop (12);
+        {
+            auto line = r.removeFromTop (30);
+            dashboardButton.setBounds (line.removeFromLeft (260));
+            line.removeFromLeft (8);
+            manualButton.setBounds (line.removeFromLeft (200));
+        }
+        r.removeFromTop (12);
+        help.setBounds (r);
+    }
+
+    void paint (juce::Graphics& g) override     { g.fillAll (panel); }
+
+private:
+    void timerCallback() override   { update(); }
+
+    void update()
+    {
+        const bool connected = importer.isSpotifyConnected();
+        sessionLabel.setText (connected ? juce::String::fromUTF8 ("Conectado como ") + importer.getSpotifyUser()
+                                        : juce::String::fromUTF8 ("Sin sesión iniciada"), juce::dontSendNotification);
+        sessionButton.setButtonText (connected ? juce::String::fromUTF8 ("Cerrar sesión") : juce::String::fromUTF8 ("Iniciar sesión con Spotify"));
+
+        const auto id = importer.getSpotifyClientId();
+        const auto shortId = id.length() > 10 ? id.substring (0, 6) + "..." + id.getLastCharacters (4) : id;
+        inUseLabel.setText (importer.isUsingCustomClientId()
+                                ? juce::String::fromUTF8 ("En uso: tu Client ID propio (") + shortId + ")"
+                                : id.isNotEmpty() ? juce::String::fromUTF8 ("En uso: el de serie de CesarDJ (") + shortId + ")"
+                                                  : juce::String::fromUTF8 ("No hay ningún Client ID: pega el tuyo"),
+                            juce::dontSendNotification);
+        builtInButton.setEnabled (importer.isUsingCustomClientId() && importer.getSpotifyBuiltInClientId().isNotEmpty());
+    }
+
+    // Cambiar el Client ID cierra la sesión: se avisa antes si hay una abierta
+    void apply (const juce::String& newId, const juce::String& done)
+    {
+        const bool changes = (newId.isNotEmpty() ? newId : importer.getSpotifyBuiltInClientId()) != importer.getSpotifyClientId();
+        juce::Component::SafePointer<SpotifyPage> safe (this);
+        auto doIt = [safe, newId, done]
+        {
+            if (safe == nullptr) return;
+            safe->importer.setSpotifyCustomClientId (newId);
+            safe->update();
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Spotify", done);
+        };
+
+        if (changes && importer.isSpotifyConnected())
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Spotify",
+                juce::String::fromUTF8 ("Al cambiar el Client ID se cerrará la sesión de ") + importer.getSpotifyUser()
+                    + juce::String::fromUTF8 (" y tendrás que volver a iniciar sesión.\n\n¿Continuar?"),
+                "Continuar", "Cancelar", nullptr,
+                juce::ModalCallbackFunction::create ([doIt] (int r) { if (r == 1) doIt(); }));
+        else
+            doIt();
+    }
+
+    void save()
+    {
+        const auto id = idEditor.getText().trim();
+        if (! SpotifyClient::isValidClientId (id))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Spotify",
+                juce::String::fromUTF8 ("Eso no parece un Client ID: debe tener 32 caracteres (números y letras de la a a la f).\n\n"
+                                        "Cópialo del panel de Spotify: tu app > Settings > \"Client ID\"."));
+            return;
+        }
+        if (id.equalsIgnoreCase (importer.getSpotifyBuiltInClientId()))
+        {
+            useBuiltIn();
+            return;
+        }
+        apply (id, juce::String::fromUTF8 ("Client ID guardado. Ahora inicia sesión con Spotify.\n\n"
+                                           "Recuerda: solo podrán entrar las cuentas que añadas en User Management de tu app."));
+    }
+
+    void useBuiltIn()
+    {
+        idEditor.clear();
+        apply ({}, juce::String::fromUTF8 ("CesarDJ vuelve a usar su Client ID de serie."));
+    }
+
+    PlaylistImporter& importer;
+    juce::OwnedArray<juce::Label> labels;
+    juce::Label sessionLabel, inUseLabel, redirect, help;
+    juce::TextEditor idEditor;
+    juce::TextButton sessionButton, saveButton { "Guardar" }, builtInButton { "Usar el de serie" },
+                     copyButton { "Copiar" }, dashboardButton { "Abrir el panel de Spotify (navegador)" },
+                     manualButton { "Ayuda: paso a paso" };
+};
+
+//==============================================================================
+SettingsWindow::SettingsWindow (juce::AudioDeviceManager& devices, MixerEngine& mixer, MidiController& midi, PlaylistImporter& importer,
                                 juce::PropertiesFile& settings, std::function<void (bool)> setLearning, std::function<bool()> isLearning)
     : juce::DocumentWindow (juce::String::fromUTF8 ("Configuración - CesarDJ"), panel, juce::DocumentWindow::closeButton)
 {
@@ -745,6 +1127,8 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager& devices, MixerEngine& 
     t->getTabbedButtonBar().setColour (juce::TabbedButtonBar::tabOutlineColourId, juce::Colours::transparentBlack);
     t->addTab ("Audio", panel, new AudioPage (devices, mixer, settings), true);
     t->addTab ("Controladoras", panel, new ControllersPage (midi, std::move (setLearning), std::move (isLearning)), true);
+    t->addTab ("Spotify", panel, new SpotifyPage (importer), true);
+    t->addTab ("Funciones", panel, new FeaturesPage (settings), true);
     tabs = t;
 
     setContentOwned (t, false);

@@ -17,6 +17,7 @@
 #include "PlaylistImport.h"
 #include "SettingsWindow.h"
 #include "Help.h"
+#include "FeatureRuntime.h"
 
 // Ventana principal: posee el audio, los dos decks, el mezclador y el navegador.
 class MainComponent : public juce::AudioAppComponent,
@@ -39,6 +40,10 @@ public:
 
     // Archivos pasados al abrir MiDJ (línea de comandos / "Abrir con"): el 1º al deck A, el 2º al B
     void loadFiles (const juce::String& commandLine);
+
+    // Al cerrar: si "Confirmar antes de cerrar" está activada y algo suena o graba, pregunta y devuelve true
+    // (CesarDJ se cierra solo si el usuario acepta)
+    bool askBeforeQuit();
 
 private:
     void timerCallback() override;
@@ -89,6 +94,8 @@ private:
     AutomixController automix { library, { &deckA, &deckB }, { &deckViewA, &deckViewB }, mixerView };
     std::unique_ptr<MidiController> midi;
     std::unique_ptr<SettingsWindow> settingsWindow;
+    std::unique_ptr<FeatureRuntime> features;
+    bool statusWarning = false, quitDialogOpen = false;
     ClickListener learnListener;
     juce::String statusMessage;
     juce::uint32 statusMessageUntil = 0;

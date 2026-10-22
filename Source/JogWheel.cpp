@@ -1,6 +1,7 @@
 #include "JogWheel.h"
 #include "DJLookAndFeel.h"
 #include "Branding.h"
+#include "TagReader.h"
 
 namespace
 {
@@ -19,6 +20,91 @@ JogWheel::JogWheel (DeckEngine& engine, juce::Colour deckColour)
 void JogWheel::resized()
 {
     renderPlatter();
+    renderCover();
+}
+
+namespace
+{
+    constexpr float coverZone = 0.62f;               // radio de la carátula, en fracción del vinilo
+
+    // Carátula: la del archivo (ID3, FLAC...) o una imagen de portada en la misma carpeta
+    juce::Image findCover (const juce::File& file)
+    {
+        auto image = TagReader::readCoverArt (file);
+        if (image.isValid())
+            return image;
+
+        for (auto* name : { "cover", "folder", "front", "album", "albumart" })
+            for (auto* ext : { ".jpg", ".jpeg", ".png" })
+            {
+                const auto f = file.getSiblingFile (juce::String (name) + ext);
+                if (f.existsAsFile())
+                    if (auto img = juce::ImageFileFormat::loadFrom (f); img.isValid())
+                        return img;
+            }
+        return {};
+    }
+}
+
+// Al cargar otra canción se lee su carátula en segundo plano (los archivos grandes tardan un poco)
+void JogWheel::checkTrackChanged()
+{
+    const auto track = deck.getTrackShared();
+    if (track.get() == coverTrack)
+        return;
+
+    coverTrack = track.get();
+    coverSource = {};
+    coverImage = {};
+    if (track == nullptr)
+        return;
+
+    std::weak_ptr<bool> weak = alive;
+    const auto file = track->file;
+    const void* id = coverTrack;
+    juce::Thread::launch ([this, weak, file, id]
+    {
+        auto image = findCover (file);
+        juce::MessageManager::callAsync ([this, weak, id, image]
+        {
+            if (weak.expired() || id != coverTrack)
+                return;
+            coverSource = image;
+            renderCover();
+        });
+    });
+}
+
+// Se escala y recorta una sola vez; al pintar solo se gira
+void JogWheel::renderCover()
+{
+    coverImage = {};
+    const int size = juce::jmin (getWidth(), getHeight());
+    if (! coverSource.isValid() || size <= 0)
+        return;
+
+    const float scale = juce::Component::getApproximateScaleFactorForComponent (this);
+    const float r = (size - 4.0f) * 0.5f * scratchZone * coverZone;
+    const int px = juce::jmax (8, juce::roundToInt (r * 2.0f * scale));
+
+    coverImage = juce::Image (juce::Image::ARGB, px, px, true);
+    juce::Graphics g (coverImage);
+    const auto bounds = juce::Rectangle<float> ((float) px, (float) px);
+
+    juce::Path circle;
+    circle.addEllipse (bounds);
+    g.reduceClipRegion (circle);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (coverSource, bounds, juce::RectanglePlacement::centred | juce::RectanglePlacement::fillDestination);
+
+    // Borde y agujero central, como un vinilo de verdad
+    const float s = (float) px;
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
+    g.drawEllipse (bounds.reduced (s * 0.006f), s * 0.012f);
+    g.setColour (juce::Colour (0xff0c0d0f));
+    g.fillEllipse (bounds.withSizeKeepingCentre (s * 0.075f, s * 0.075f));
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.drawEllipse (bounds.withSizeKeepingCentre (s * 0.075f, s * 0.075f), s * 0.006f);
 }
 
 // El vinilo se dibuja una vez en una imagen; luego solo se rota la marca
@@ -96,9 +182,22 @@ void JogWheel::paint (juce::Graphics& g)
         g.drawImage (platterImage, area.expanded (2.0f), juce::RectanglePlacement::stretchToFit);
     }
 
-    // Marca de giro sobre el vinilo
+    // Carátula de la canción en el centro, girando con el disco
+    if (coverImage.isValid())
+    {
+        const float coverR = vinylR * coverZone;
+        const float k = coverR * 2.0f / (float) coverImage.getWidth();
+        g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+        g.drawImageTransformed (coverImage,
+                                juce::AffineTransform::translation (-coverImage.getWidth() * 0.5f, -coverImage.getHeight() * 0.5f)
+                                    .scaled (k)
+                                    .rotated (rotation)
+                                    .translated (c.x, c.y));
+    }
+
+    // Marca de giro sobre el vinilo (por fuera de la carátula)
     juce::Path marker;
-    marker.addRoundedRectangle (-2.0f, -vinylR + 3.0f, 4.0f, vinylR * 0.5f, 2.0f);
+    marker.addRoundedRectangle (-2.0f, -vinylR + 3.0f, 4.0f, vinylR * (coverImage.isValid() ? 0.3f : 0.5f), 2.0f);
     g.setColour (juce::Colours::white.withAlpha (0.9f));
     g.fillPath (marker, juce::AffineTransform::rotation (rotation).translated (c.x, c.y));
 
@@ -213,6 +312,8 @@ void JogWheel::midiTurn (int delta)
 
 void JogWheel::timerCallback()
 {
+    checkTrackChanged();
+
     const double now = juce::Time::getMillisecondCounterHiRes();
 
     // Soltar el empujón si el ratón deja de moverse o termina el de la rueda

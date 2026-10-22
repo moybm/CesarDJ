@@ -38,8 +38,13 @@ public:
 
     explicit SpotifyClient (juce::PropertiesFile& settings);
 
+    // Client ID en uso: el propio (CONFIG > Spotify) si se ha puesto; si no, el de serie
     juce::String getClientId() const;
     void setClientId (const juce::String& id);
+    static juce::String getBuiltInClientId();
+    juce::String getCustomClientId() const;
+    void setCustomClientId (const juce::String& id);            // vacío = volver al de serie
+    static bool isValidClientId (const juce::String& id);       // 32 caracteres hexadecimales
     bool hasSession() const;
     void logout();
     juce::String getUserName() const;
@@ -92,6 +97,12 @@ public:
     void importAllSpotify();
     // Canciones de una lista de Spotify, emparejadas con la biblioteca (file vacío = falta)
     void fetchSpotifyTracks (const juce::String& id, std::function<void (std::vector<LibraryTrack>)> onDone);
+
+    // Client ID (CONFIG > Spotify). Cambiarlo cierra la sesión: cada sesión pertenece a un Client ID.
+    juce::String getSpotifyClientId() const          { return spotify.getClientId(); }
+    juce::String getSpotifyBuiltInClientId() const   { return SpotifyClient::getBuiltInClientId(); }
+    bool isUsingCustomClientId() const               { return spotify.getCustomClientId().isNotEmpty(); }
+    void setSpotifyCustomClientId (const juce::String& id);
 
     std::function<void (const juce::String&)> onStatus;     // mensajes para la barra superior
     std::function<void (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>&)> onSpotifyState;

@@ -29,10 +29,17 @@ private:
     void timerCallback() override;
     float angleAt (juce::Point<float> p) const;
     void renderPlatter();
+    void checkTrackChanged();
+    void renderCover();
 
     DeckEngine& deck;
     juce::Colour colour;
     juce::Image platterImage;
+
+    // Carátula de la canción cargada, recortada en círculo para el centro del plato
+    const void* coverTrack = nullptr;
+    juce::Image coverSource, coverImage;
+    std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     juce::VBlankAttachment vblank { this, [this] { repaint(); } };
 
     enum class Mode { none, scratch, bend } mode = Mode::none;

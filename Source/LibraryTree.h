@@ -20,7 +20,7 @@ public:
 
     // Sección Spotify (sesión iniciada dentro de CesarDJ)
     void setSpotifyState (bool connected, const juce::String& user, const std::vector<ExternalPlaylist>& lists);
-    std::function<void()> onSpotifyLogin, onSpotifyLogout, onSpotifyRefresh, onSpotifyImportAll;
+    std::function<void()> onSpotifyLogin, onSpotifyLogout, onSpotifyRefresh, onSpotifyImportAll, onSpotifySettings;
     std::function<void (const ExternalPlaylist&)> onSpotifyImport;
 
     void askNewPlaylist (const juce::Array<juce::int64>& tracksToAdd = {});

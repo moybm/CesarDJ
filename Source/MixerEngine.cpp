@@ -196,6 +196,9 @@ void MixerEngine::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferT
         }
     }
 
+    // Pico antes del limitador (aviso de saturación, CONFIG > Funciones)
+    storePeak (preLimiterPeak, juce::jmax (masterBuffer.getMagnitude (0, 0, n), masterBuffer.getMagnitude (1, 0, n)));
+
     // Limitador final: evita que la salida sature
     {
         juce::dsp::AudioBlock<float> block (masterBuffer.getArrayOfWritePointers(), 2, 0, (size_t) n);

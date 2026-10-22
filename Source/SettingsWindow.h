@@ -3,6 +3,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "MixerEngine.h"
 #include "MidiController.h"
+#include "PlaylistImport.h"
 
 // Enrutado de salidas (master / auriculares): se guarda en la configuración y se aplica al arrancar
 namespace AudioRouting
@@ -16,12 +17,14 @@ namespace AudioRouting
 // Ventana de Configuración (como la de VirtualDJ):
 //  - Audio: tarjeta / controladora, frecuencia, búfer, a qué salidas van master y auriculares
 //  - Controladoras: las conectadas, activar/desactivar, MIDI learn, asignaciones y perfiles
+//  - Spotify: sesión y Client ID propio (la app de Spotify de una cuenta Premium)
+//  - Funciones: funciones opcionales (todas desactivadas por defecto)
 class SettingsWindow : public juce::DocumentWindow
 {
 public:
-    enum Tab { audioTab = 0, controllersTab = 1 };
+    enum Tab { audioTab = 0, controllersTab = 1, spotifyTab = 2, featuresTab = 3 };
 
-    SettingsWindow (juce::AudioDeviceManager& devices, MixerEngine& mixer, MidiController& midi,
+    SettingsWindow (juce::AudioDeviceManager& devices, MixerEngine& mixer, MidiController& midi, PlaylistImporter& importer,
                     juce::PropertiesFile& settings, std::function<void (bool)> setLearning, std::function<bool()> isLearning);
 
     void showTab (Tab tab);

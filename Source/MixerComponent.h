@@ -40,6 +40,7 @@ public:
     void setCrossfader (float value)                 { crossfader.setValue (value, juce::sendNotificationSync); }
     void setEqLow (int channel, float value)         { strips[(size_t) channel].knobs[3].setValue (value, juce::sendNotificationSync); }
     void setChannelVolume (int channel, float value) { strips[(size_t) channel].volume.setValue (value, juce::sendNotificationSync); }
+    void setGainDb (int channel, float db)           { strips[(size_t) channel].knobs[0].setValue (db, juce::sendNotificationSync); }
 
     // Modo de los mandos: EQ (HIGH / MID / LOW) o STEMS (VOCAL / INSTRU / BEAT)
     void setStemMode (bool shouldUseStems);

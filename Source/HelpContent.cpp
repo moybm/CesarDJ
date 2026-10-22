@@ -149,6 +149,8 @@ Se configuran en CONFIG > Controladoras (o con el botón MIDI de arriba). La luz
 
 ## Plato
 - Centro: scratch. Aro exterior: empujar o frenar (para cuadrar los beats a mano). Rueda del ratón: ajuste fino.
+- En el centro del disco aparece la carátula de la canción cargada y gira con él, como un vinilo. Sale de la imagen guardada dentro del archivo (MP3, FLAC, WAV...) o, si no tiene, de una imagen "cover", "folder" o "front" (.jpg o .png) en la misma carpeta. Sin carátula se ve la etiqueta de color del deck.
+- La marca blanca indica el giro y el aro de color, por dónde va la canción (en rojo, los últimos 30 segundos).
 
 ## Pads
 - HOT CUE: clic = fijar o saltar a ese punto; clic derecho = borrarlo. Se guardan con la canción.
@@ -284,6 +286,94 @@ Botón "Importar" (abajo a la izquierda) o clic derecho en LISTAS.
 - La otra persona no tiene que crear nada en Spotify ni entrar en la web de desarrolladores.
 - Si sigue saliendo el error 403, revisa que el correo sea exactamente el de su cuenta de Spotify.
 ! Si alguien te envía un texto que empieza por "Authorization token" o "const token =", es una página de ejemplo de la web de desarrolladores de Spotify, no un error de CesarDJ. Ese texto incluye una clave de acceso temporal a su cuenta: no hay que usarlo ni reenviarlo.
+
+## Usar tu propia cuenta de Spotify como administrador
+- Si tienes Spotify Premium, puedes crear tu propia app de Spotify y poner su Client ID en CONFIG > Spotify. Así no dependes de nadie: tu cuenta es la propietaria y tú decides quién entra.
+- Está explicado paso a paso en el apartado "Spotify: usar tu propia cuenta (paso a paso)".
+)MANUAL" },
+
+    { "spotifypropia", "Spotify: usar tu propia cuenta (paso a paso)", R"MANUAL(
+CesarDJ trae un Client ID de serie (la app de Spotify del administrador de CesarDJ). Con él, cada cuenta nueva tiene que pedirle al administrador que la autorice, y todo depende de que su cuenta siga siendo Premium.
+
+Si tienes Spotify Premium, puedes hacerte tu propia app de Spotify (gratis, unos 5 minutos) y usarla en CesarDJ. Tu cuenta pasa a ser la propietaria y tú autorizas a quien quieras.
+
+## Antes de empezar
+- Ten a mano el correo y la contraseña de tu cuenta de Spotify.
+- Mira el correo exacto de tu cuenta: spotify.com > tu foto > Cuenta > Editar perfil (o "Información de la cuenta"). Lo necesitarás en el paso 4.
+- Los nombres de los botones del panel de Spotify están en inglés y pueden cambiar un poco con el tiempo.
+
+## Paso 1: abrir el panel de desarrolladores de Spotify
+- En CesarDJ: CONFIG > Spotify > "Abrir el panel de Spotify". Se abre developer.spotify.com/dashboard en tu navegador.
+- Inicia sesión con tu cuenta de Spotify (la Premium).
+- La primera vez, Spotify te pide aceptar sus condiciones para desarrolladores ("Developer Terms") y, a veces, verificar tu correo. Hazlo y vuelve al panel.
+
+## Paso 2: crear la app
+- Pulsa "Create app".
+- App name: CesarDJ (o el nombre que quieras).
+- App description: por ejemplo "Mis listas en CesarDJ".
+- Website: déjalo en blanco.
+- Redirect URIs: en CesarDJ pulsa "Copiar" junto a "Dirección de retorno", pégala aquí (http://127.0.0.1:8888/callback) y pulsa "Add". Tiene que ser exactamente esa, con 127.0.0.1 (no "localhost").
+- "Which API/SDKs are you planning to use?": marca "Web API".
+- Marca que aceptas las condiciones y pulsa "Save".
+
+## Paso 3: copiar el Client ID a CesarDJ
+- En tu app, pulsa "Settings". En "Basic Information" verás el "Client ID": 32 letras y números.
+- Cópialo y pégalo en CesarDJ, en CONFIG > Spotify, en el cuadro del Client ID. Pulsa "Guardar".
+- Debajo de "CLIENT ID" pondrá "En uso: tu Client ID propio".
+- Si tenías una sesión de Spotify abierta, se cierra: es normal, cada sesión pertenece a una app.
+! No copies el "Client secret" (botón "View client secret"): también tiene 32 caracteres pero es privado y CesarDJ no lo usa. Si lo pegas o lo compartes por error, pulsa "Rotate" en el panel para cambiarlo.
+
+## Paso 4: añadir tu cuenta (y las de otros) en User Management
+- En tu app del panel, abre la pestaña "User Management".
+- Rellena "Full name" con tu nombre y "Email" con el correo exacto de tu cuenta de Spotify. Pulsa "Add user".
+- Aunque seas el propietario de la app, añade también tu propia cuenta: así es seguro que te deja entrar.
+- Para que otra persona use CesarDJ con tu Client ID: pídele su nombre y el correo exacto de su cuenta de Spotify y añádela igual. En su CesarDJ también tiene que poner tu Client ID (paso 3).
+- El número de cuentas que se pueden añadir es limitado (lo indica el propio panel). Spotify puede tardar unos minutos en aplicar los cambios.
+
+## Paso 5: iniciar sesión en CesarDJ
+- En CONFIG > Spotify pulsa "Iniciar sesión con Spotify" (o en el árbol, SPOTIFY > "Iniciar sesión con Spotify").
+- Entra con tu cuenta y pulsa "Aceptar". La ventana se cierra sola.
+- En el árbol verás "SPOTIFY" con tu nombre, tus listas, "Canciones que me gustan" y tus álbumes. Ya está.
+
+## Si algo falla
+- Error 403 ("no autorizada"): la cuenta no está en User Management de tu app, o el correo no es exactamente el de la cuenta. Revísalo, espera unos minutos y vuelve a iniciar sesión.
+- "INVALID_CLIENT" o "Invalid redirect URI" en la página de Spotify: el Client ID está mal copiado, o la dirección de retorno de tu app no es exactamente http://127.0.0.1:8888/callback. Corrígelo en el panel (Settings > Edit) y vuelve a intentarlo.
+- Antes funcionaba y ahora no: comprueba en el panel si Spotify muestra algún aviso, por ejemplo que tu cuenta ya no es Premium.
+- Para volver a la app del administrador de CesarDJ: CONFIG > Spotify > "Usar el de serie".
+
+## Bueno saberlo
+- El Client ID propio se guarda en los ajustes de este PC. En otro PC hay que ponerlo otra vez (paso 3).
+- El Client ID no es una contraseña: es el identificador público de tu app. Aun así, compártelo solo con quien vaya a usar CesarDJ.
+- Tu app está en "modo desarrollo": es lo normal para uso personal y no hay que pedir nada más a Spotify.
+- Aunque tengas tu propia app, las canciones de Spotify siguen sin poder pincharse en CesarDJ: solo se leen tus listas (ver "Spotify: qué se puede y qué no").
+)MANUAL" },
+
+    { "funciones", "Funciones opcionales (CONFIG > Funciones)", R"MANUAL(
+Funciones extra que cada uno activa si quiere. Todas vienen desactivadas. Se activan en CONFIG > Funciones, se guardan solas y tienen efecto al momento, sin reiniciar.
+
+## Protección anti-desastres
+- Alerta de silencio: cuando lo que suena por los altavoces está a punto de acabar y no hay otra canción sonando, arriba aparece en rojo "Silencio en 15 s: prepara y lanza la siguiente canción", con la cuenta atrás. Elige la antelación: 10, 20 o 30 segundos. Con el Automix activado no avisa, porque él ya se encarga.
+- Aviso de saturación del master: si la mezcla suena tan fuerte que el limitador tiene que aplastarla durante un rato, avisa en rojo para que bajes el GAIN de los canales o el volumen master. El limitador sigue protegiendo los altavoces igualmente; el aviso es para que suene mejor.
+- Confirmar antes de cerrar CesarDJ: si hay música sonando o una grabación en marcha, pregunta "¿Seguro que quieres cerrar?" antes de cerrar el programa (con la X o con Alt+F4).
+- CesarDJ ya impide siempre cargar una canción encima de un deck que está sonando, aunque esta función esté desactivada.
+
+## Tracklist con tiempos al grabar
+- Mientras grabas (REC), CesarDJ apunta qué canción suena y en qué minuto. La canción "principal" es la que más se oye por el master (fader y crossfader); se apunta cuando lleva 8 segundos siéndolo, con el minuto en que empezó a sonar como principal.
+- Al terminar la grabación, la ventana "Grabación guardada" muestra la tracklist y el botón "Copiar tracklist". También se guarda como archivo .txt junto a la grabación, con el mismo nombre.
+- Formatos: YouTube ("00:00 Artista - Título"; la primera línea siempre empieza en 00:00, como exige YouTube para crear capítulos), Mixcloud ("1. Artista - Título (00:00)") o Texto simple ("Artista - Título").
+- El artista y el título salen de las etiquetas del archivo; si no tiene, del nombre del archivo.
+
+## Volumen igualado
+- Al cargar una canción, CesarDJ mide en segundo plano lo fuerte que suena de media y mueve el GAIN de su canal para que todas suenen parecido. Arriba verás, por ejemplo, "Volumen igualado (deck A): GAIN +2.5 dB".
+- Nivel: Suave (para casa o música de fondo), Normal o Club (más fuerte). El GAIN se mueve como mucho 12 dB arriba o abajo.
+- Después puedes retocar el GAIN a mano como siempre. Las canciones que ya estaban cargadas al activarla no se tocan.
+
+## Recuperación tras un cierre inesperado
+- Si CesarDJ o el PC se cierran de golpe (un cuelgue, un corte de luz, cerrar desde el Administrador de tareas), al volver a abrir CesarDJ puede dejarlo como estaba: cada canción en su deck, en pausa, en el mismo punto (con unos segundos de diferencia como mucho).
+- Si había una grabación en marcha, la repara para que se pueda escuchar hasta el momento del cierre.
+- Opciones: Desactivada, "Preguntar al abrir CesarDJ" (enseña qué se puede recuperar y tú decides) o "Restaurar siempre" (lo hace sin preguntar).
+- Si una recuperación no llega a terminar bien (por ejemplo, CesarDJ se vuelve a cerrar al recuperar), la siguiente vez pregunta siempre, para no entrar en un bucle.
+- Con la función activada, CesarDJ apunta cada 5 segundos qué canciones hay en los decks y por dónde van.
 )MANUAL" },
 
     { "avisos", "Avisos y mensajes", R"MANUAL(
@@ -423,6 +513,11 @@ Lo que CesarDJ no hace, y por qué:
 )MANUAL" },
 
     { "novedades", "Novedades (historial de versiones)", R"MANUAL(
+## 0.13.0
+- CONFIG > Funciones: funciones opcionales, todas desactivadas por defecto. Alerta de silencio, aviso de saturación, confirmar antes de cerrar, tracklist con tiempos al grabar, volumen igualado y recuperación tras un cierre inesperado.
+- La carátula de la canción aparece en el centro del plato de cada deck y gira con el disco.
+- CONFIG > Spotify: sesión de Spotify y Client ID propio (para usar tu propia app de Spotify, por ejemplo con tu cuenta Premium).
+
 ## 0.12.2
 - Manual revisado y ampliado: glosario, avisos, atajos, formas de onda, menús, descargas y más soluciones de problemas.
 - El buscador del manual resalta las palabras encontradas.

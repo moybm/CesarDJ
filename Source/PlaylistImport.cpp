@@ -232,9 +232,30 @@ bool PlaylistFiles::writeM3u (const juce::File& file, const std::vector<LibraryT
 //==============================================================================
 SpotifyClient::SpotifyClient (juce::PropertiesFile& s) : settings (s) {}
 
+juce::String SpotifyClient::getBuiltInClientId()       { return juce::String (CESARDJ_SPOTIFY_CLIENT_ID); }
+juce::String SpotifyClient::getCustomClientId() const   { return settings.getValue ("spotifyCustomClientId").trim(); }
+
+void SpotifyClient::setCustomClientId (const juce::String& id)
+{
+    if (id.trim().isEmpty())
+        settings.removeValue ("spotifyCustomClientId");
+    else
+        settings.setValue ("spotifyCustomClientId", id.trim());
+    settings.saveIfNeeded();
+}
+
+bool SpotifyClient::isValidClientId (const juce::String& id)
+{
+    return id.length() == 32 && id.containsOnly ("0123456789abcdefABCDEF");
+}
+
+// Prioridad: Client ID propio (CONFIG > Spotify) > el de serie > el del asistente antiguo
 juce::String SpotifyClient::getClientId() const
 {
-    const juce::String builtIn (CESARDJ_SPOTIFY_CLIENT_ID);
+    const auto custom = getCustomClientId();
+    if (custom.isNotEmpty())
+        return custom;
+    const auto builtIn = getBuiltInClientId();
     return builtIn.isNotEmpty() ? builtIn : settings.getValue ("spotifyClientId");
 }
 
@@ -471,11 +492,20 @@ juce::var SpotifyClient::request (const juce::String& url, juce::String& error, 
     const auto json = juce::JSON::parse (stream->readEntireStreamAsString());
     forbidden = status == 403;
     if (status == 403)
-        error = juce::String::fromUTF8 ("Esta cuenta de Spotify todavía no está autorizada para usar CesarDJ (error 403).\n\n"
+        error = getCustomClientId().isNotEmpty()
+            ? juce::String::fromUTF8 ("Esta cuenta de Spotify no está autorizada en tu app de Spotify (error 403).\n\n"
+                                      "Estás usando tu propio Client ID (CONFIG > Spotify): añade esta cuenta en tu panel, "
+                                      "developer.spotify.com > tu app > User Management (nombre y correo de la cuenta), y vuelve "
+                                      "a iniciar sesión. Si tu cuenta propietaria no es Premium, Spotify puede rechazar también "
+                                      "a las cuentas añadidas.\n\nMás información: AYUDA > Spotify.")
+            : juce::String::fromUTF8 ("Esta cuenta de Spotify todavía no está autorizada para usar CesarDJ (error 403).\n\n"
                                         "Qué hacer: pide a quien te dio CesarDJ que añada tu cuenta. Necesita el nombre y el "
                                         "correo con los que entras en Spotify (él lo hace en su panel: developer.spotify.com > "
-                                        "CesarDJ > User Management). Después vuelve a pulsar \"Iniciar sesión con Spotify\".\n\n"
-                                        "Tú no tienes que entrar en la web de desarrolladores de Spotify ni copiar nada de ella.\n\n"
+                                        "CesarDJ > User Management). Después vuelve a pulsar \"Iniciar sesión con Spotify\". "
+                                        "O, si tienes Spotify Premium, puedes crear tu propia app de Spotify y poner su Client ID "
+                                        "en CONFIG > Spotify.\n\n"
+                                        "Con el Client ID de serie no tienes que entrar en la web de desarrolladores de Spotify "
+                                        "ni copiar nada de ella.\n\n"
                                         "Mientras tanto puedes importar tus listas con un archivo CSV (Importar > Desde un archivo). "
                                         "Más información: AYUDA > Spotify > Cuentas autorizadas.");
     else if (status >= 400)
@@ -1224,6 +1254,17 @@ void PlaylistImporter::logoutSpotify()
 
     status (juce::String::fromUTF8 ("Sesión de Spotify cerrada"));
     publishSpotifyState();
+}
+
+// Client ID propio (o vacío = el de serie). Si cambia el que está en uso, la sesión guardada ya no vale.
+void PlaylistImporter::setSpotifyCustomClientId (const juce::String& id)
+{
+    const auto before = spotify.getClientId();
+    spotify.setCustomClientId (id);
+    if (spotify.getClientId() != before && spotify.hasSession())
+        logoutSpotify();
+    else
+        publishSpotifyState();
 }
 
 void PlaylistImporter::refreshSpotify()

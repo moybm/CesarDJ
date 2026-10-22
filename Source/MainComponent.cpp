@@ -82,6 +82,7 @@ MainComponent::MainComponent()
     tree.onSpotifyRefresh   = [this] { importer.refreshSpotify(); };
     tree.onSpotifyImportAll = [this] { importer.importAllSpotify(); };
     tree.onSpotifyImport    = [this] (const ExternalPlaylist& p) { importer.importSpotifyPlaylist (p); };
+    tree.onSpotifySettings  = [this] { showSettings (SettingsWindow::spotifyTab); };
     browser.fetchSpotify = [this] (const juce::String& id, std::function<void (std::vector<LibraryTrack>)> done)
     {
         importer.fetchSpotifyTracks (id, std::move (done));
@@ -186,11 +187,30 @@ MainComponent::MainComponent()
     };
     midi->onStatus = [this] (const juce::String& msg) { showStatus (msg); };
 
+    // Funciones opcionales (CONFIG > Funciones)
+    features = std::make_unique<FeatureRuntime> (settings, std::array<DeckEngine*, 2> { &deckA, &deckB },
+                                                 std::array<DeckComponent*, 2> { &deckViewA, &deckViewB },
+                                                 mixer, mixerView, recorder, automix);
+    features->onStatus = [this] (const juce::String& msg, bool warning, int ms)
+    {
+        if (midi != nullptr && midi->isLearning())
+            return;
+        statusMessage = msg;
+        statusWarning = warning;
+        statusMessageUntil = juce::Time::getMillisecondCounter() + (juce::uint32) ms;
+        repaint (statusArea);
+    };
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    juce::Timer::callAfterDelay (2500, [safeThis] { if (safeThis != nullptr && safeThis->features != nullptr) safeThis->features->startupRecovery(); });
+
     startTimerHz (10);
 }
 
 MainComponent::~MainComponent()
 {
+    if (features != nullptr)
+        features->markCleanExit();
+    features = nullptr;
     automix.setEnabled (false);
     settings.setValue ("automixBeats", automix.getTransitionBeats());
     setLearning (false);
@@ -398,8 +418,32 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
         Branding::showAbout();
 }
 
+bool MainComponent::askBeforeQuit()
+{
+    juce::String reason;
+    if (features == nullptr || ! features->shouldConfirmQuit (reason))
+        return false;
+
+    if (! quitDialogOpen)
+    {
+        quitDialogOpen = true;
+        juce::Component::SafePointer<MainComponent> safe (this);
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, juce::String::fromUTF8 ("¿Cerrar CesarDJ?"),
+            reason + juce::String::fromUTF8 ("\n\n¿Seguro que quieres cerrar CesarDJ?"), "Cerrar", "Seguir pinchando", nullptr,
+            juce::ModalCallbackFunction::create ([safe] (int r)
+            {
+                if (safe != nullptr)
+                    safe->quitDialogOpen = false;
+                if (r == 1)
+                    juce::JUCEApplication::getInstance()->quit();
+            }));
+    }
+    return true;
+}
+
 void MainComponent::showStatus (const juce::String& message)
 {
+    statusWarning = false;
     statusMessage = message;
     statusMessageUntil = juce::Time::getMillisecondCounter() + 3500;
 }
@@ -430,10 +474,25 @@ void MainComponent::toggleRecording()
         const double seconds = recorder.getSeconds();
         recorder.stop();
 
-        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::InfoIcon, juce::String::fromUTF8 ("Grabación guardada"),
-            file.getFileName() + "\n" + juce::String (seconds / 60.0, 1) + " min  -  " + juce::File::descriptionOfSizeInBytes (file.getSize()),
-            "Abrir carpeta", "Cerrar", nullptr,
-            juce::ModalCallbackFunction::create ([file] (int r) { if (r == 1) file.revealToUser(); }));
+        const auto info = file.getFileName() + "\n" + juce::String (seconds / 60.0, 1) + " min  -  "
+                          + juce::File::descriptionOfSizeInBytes (file.getSize());
+        const auto tracklist = features != nullptr ? features->recordingStopped (file) : juce::String();
+
+        if (tracklist.isEmpty())
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::InfoIcon, juce::String::fromUTF8 ("Grabación guardada"),
+                info, "Abrir carpeta", "Cerrar", nullptr,
+                juce::ModalCallbackFunction::create ([file] (int r) { if (r == 1) file.revealToUser(); }));
+        else
+            juce::AlertWindow::showYesNoCancelBox (juce::MessageBoxIconType::InfoIcon, juce::String::fromUTF8 ("Grabación guardada"),
+                info + juce::String::fromUTF8 ("\n\nTracklist (también guardada junto a la grabación, .txt):\n\n") + tracklist,
+                "Abrir carpeta", "Copiar tracklist", "Cerrar", nullptr,
+                juce::ModalCallbackFunction::create ([file, tracklist] (int r)
+                {
+                    if (r == 1)
+                        file.revealToUser();
+                    else if (r == 2)
+                        juce::SystemClipboard::copyTextToClipboard (tracklist);
+                }));
         return;
     }
 
@@ -446,6 +505,8 @@ void MainComponent::toggleRecording()
                                                 "No se pudo crear el archivo:\n" + file.getFullPathName());
     else
     {
+        if (features != nullptr)
+            features->recordingStarted();
         showStatus (juce::String::fromUTF8 ("Grabando en ") + file.getFullPathName());
         Help::notice ("recording", juce::String::fromUTF8 ("Grabación"),
             juce::String::fromUTF8 ("Se graba exactamente lo que sale por el master, en WAV de 24 bits, en Música\\CesarDJ Grabaciones. "
@@ -582,7 +643,7 @@ void MainComponent::showSettings (SettingsWindow::Tab tab)
 {
     if (settingsWindow == nullptr)
     {
-        settingsWindow = std::make_unique<SettingsWindow> (deviceManager, mixer, *midi, settings,
+        settingsWindow = std::make_unique<SettingsWindow> (deviceManager, mixer, *midi, importer, settings,
                                                            [this] (bool on) { setLearning (on); },
                                                            [this] { return midi != nullptr && midi->isLearning(); });
         juce::Component::SafePointer<MainComponent> safe (this);
@@ -635,8 +696,11 @@ void MainComponent::paint (juce::Graphics& g)
 
     if (statusMessage.isNotEmpty() && juce::Time::getMillisecondCounter() < statusMessageUntil)
     {
-        g.setColour (midi != nullptr && midi->isLearning() ? juce::Colour (0xffe0912a) : DJColours::text);
+        g.setColour (midi != nullptr && midi->isLearning() ? juce::Colour (0xffe0912a)
+                     : statusWarning ? juce::Colour (0xffff4d4d) : DJColours::text);
+        g.setFont (juce::FontOptions (statusWarning ? 13.0f : 12.0f, statusWarning ? juce::Font::bold : juce::Font::plain));
         g.drawText (statusMessage, statusArea, juce::Justification::centred, true);
+        g.setFont (juce::FontOptions (12.0f));
     }
     else if (automix.isEnabled())
     {

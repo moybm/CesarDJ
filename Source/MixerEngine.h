@@ -44,6 +44,7 @@ public:
     std::atomic<float> crossfader { 0.5f };     // 0 = solo A, 1 = solo B
     std::atomic<float> masterVolume { 1.0f };   // 0..1
     std::atomic<float> masterPeakLeft { 0.0f }, masterPeakRight { 0.0f };
+    std::atomic<float> preLimiterPeak { 0.0f };     // pico antes del limitador (se pone a 0 al leerlo)
     std::atomic<int> outputChannelCount { 2 };   // salidas abiertas en la tarjeta
 
     // Enrutado (índice de la primera salida del par: 0 = salidas 1-2, 2 = salidas 3-4...)
